@@ -1,0 +1,20 @@
+continuous_event_time_col: SYNTHETIC_EVENT_TIME
+event_id_col: EVENT_ID
+event_name: synthetic
+event_time_cat_col: SYNTHETIC_EVENT_TIME_CAT
+event_time_feature_col: BINARY_TIME_VARIABLE
+feature_define_state_labels: BINARY_TIME_VARIABLE
+features:
+  BINARY_TIME_VARIABLE: bernoulli
+  VARIABLE_1: gaussian
+  VARIABLE_2: poisson
+hidden_state_labels:
+- low
+- medium
+- high
+id_col: SUBJECT_ID
+model_name: hmm_synthetic_data_test
+n_states: 3
+save_model_path: /workspaces/master-thesis-recurrent-health-events-prediction/_models/mimic/hmm
+time_col: TIME
+use_only_sequences_gte_2_steps: false

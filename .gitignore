@@ -1,0 +1,11 @@
+data
+.venv
+.vscode
+.neptune-token
+.DS_Store
+.neptune
+__pycache__
+_models
+*.pyc
+*.pkl
+*.csv

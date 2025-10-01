@@ -1,0 +1,21 @@
+continuous_event_time_col: LOG_DAYS_UNTIL_NEXT_HOSPITALIZATION
+event_id_col: HADM_ID
+event_name: readmission
+event_time_cat_col: READMISSION_TIME_CAT
+event_time_feature_col: LOG_DAYS_UNTIL_NEXT_HOSPITALIZATION
+feature_define_state_labels: LOG_DAYS_UNTIL_NEXT_HOSPITALIZATION
+features:
+  CHARLSON_INDEX: poisson
+  DISCHARGE_LOCATION_POST_ACUTE_CARE: bernoulli
+  LOG_DAYS_IN_ICU: gaussian
+  LOG_DAYS_UNTIL_NEXT_HOSPITALIZATION: gamma
+hidden_state_labels:
+- high
+- medium
+- low
+id_col: SUBJECT_ID
+model_name: hmm_mimic_time_log_gamma
+n_states: 3
+save_model_path: /workspaces/master-thesis-recurrent-health-events-prediction/_models/mimic/hmm
+time_col: ADMITTIME
+use_only_sequences_gte_2_steps: false

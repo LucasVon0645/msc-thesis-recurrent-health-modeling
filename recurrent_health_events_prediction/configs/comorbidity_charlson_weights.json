@@ -1,0 +1,19 @@
+{
+    "myocardial_infarct": 1,
+    "congestive_heart_failure": 1,
+    "peripheral_vascular_disease": 1,
+    "cerebrovascular_disease": 1,
+    "dementia": 1,
+    "chronic_pulmonary_disease": 1,
+    "rheumatic_disease": 1,
+    "peptic_ulcer_disease": 1,
+    "mild_liver_disease": 1,
+    "severe_liver_disease": 3,
+    "diabetes_without_cc": 1,
+    "diabetes_with_cc": 2,
+    "paraplegia": 2,
+    "renal_disease": 2,
+    "malignant_cancer": 2,
+    "metastatic_solid_tumor": 6,
+    "aids": 6
+}

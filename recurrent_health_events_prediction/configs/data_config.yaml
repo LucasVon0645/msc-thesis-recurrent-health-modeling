@@ -1,0 +1,105 @@
+dataset:
+  mimic:
+    path: "/workspaces/master-thesis-recurrent-health-events-prediction/data/mimic-iii-dataset"
+    columns_to_load:
+      admission:
+        - "HADM_ID"
+        - "ADMITTIME"
+        - "DISCHTIME"
+        - "ADMISSION_TYPE"
+        - "INSURANCE"
+        - "ETHNICITY"
+        - "DISCHARGE_LOCATION"
+      patient:
+        - "SUBJECT_ID"
+        - "GENDER"
+        - "DOB"
+        - "DOD"
+        - "DOD_HOSP"
+      procedure:
+        - "ICD9_CODE"
+        - "SHORT_TITLE"
+        - "LONG_TITLE"
+      prescription:
+        - "HADM_ID"
+        - "SUBJECT_ID"
+        - "DRUG"
+  relapse:
+    path: "/workspaces/master-thesis-recurrent-health-events-prediction/data/avh-data"
+    drop_no_showedup: true
+    min_num_test_days: 3
+training_data:
+  relapse:
+    preprocessed_path: "/workspaces/master-thesis-recurrent-health-events-prediction/data/avh-data-preprocessed"
+    log_cols_to_add:
+    - "TIME_SINCE_LAST_NEGATIVE"
+    - "TIME_SINCE_LAST_POSITIVE"
+    - "PARTICIPATION_DAYS"
+    - "TIME_UNTIL_NEXT_POSITIVE"
+    cols_to_add_start_relapse:
+    - "PARTICIPATION_DAYS"
+    - "DRUGS_TESTED"
+    - "DRUG_POSITIVE_PAST_MEAN"
+    - "DRUG_POSITIVE_PAST_SUM"
+    - "NUM_POSITIVES_SINCE_LAST_NEGATIVE"
+    - "TIME_SINCE_LAST_NEGATIVE"
+    - "TIME_SINCE_LAST_POSITIVE"
+    - "TIME_UNTIL_NEXT_POSITIVE"
+    - "PROGRAM_TYPE"
+    - "RACE"
+    - "AGE"
+    - "GENDER"
+    event_duration_bins:
+      - 0
+      - 30
+      - 90
+      - 180
+    event_duration_labels:
+      - "0-30"
+      - "30-90"
+      - "90-180"
+      - "180+"
+    binary_event_col: "RELAPSE_30_DAYS"
+    binary_threshold: 30 # in days
+  synthetic:
+    preprocessed_path: "/workspaces/master-thesis-recurrent-health-events-prediction/data/synthetic_hmm"
+  mimic:
+    preprocessed_path: "/workspaces/master-thesis-recurrent-health-events-prediction/data/mimic-iii-preprocessed/copd_heart_failure"
+    admission_types_to_consider: Null
+    censoring_limit: 120 # in days
+    consider_death_after_discharge_gt: 365 # in days
+    filters:
+      AGE:
+        min: 18 # in years
+        max: 100 # in years
+      HOSPITALIZATION_DAYS:
+        max: 180 # in days
+      READMISSION_TIME:
+        min: 2 # in days
+    clip_features:
+      HOSPITALIZATION_DAYS:
+        min: 0.5 # in days
+        max: 180 # in days
+    log_cols_to_add:
+      - "HOSPITALIZATION_DAYS"
+      - "DAYS_IN_ICU"
+      - "DAYS_UNTIL_NEXT_HOSPITALIZATION"
+      - "DAYS_SINCE_LAST_HOSPITALIZATION"
+      - "NUM_PREV_HOSPITALIZATIONS"
+      - "NUM_DRUGS"
+    event_duration_bins:
+    - 0
+    - 30
+    - 120
+    event_duration_labels:
+    - "0-30"
+    - "30-120"
+    - "120+"
+    binary_event_col: "READMISSION_30_DAYS"
+    binary_threshold: 30 # in days
+final_results:
+    mimic_path: "/workspaces/master-thesis-recurrent-health-events-prediction/results/mimic"
+    relapse_path: "/workspaces/master-thesis-recurrent-health-events-prediction/results/drug_relapse"
+neptune:
+  token_file_path: "/workspaces/master-thesis-recurrent-health-events-prediction/.neptune-token"
+  project: "LucasAncken-MasterThesis/RecurrentHealthEventsPrediction"  # replace with your Neptune project

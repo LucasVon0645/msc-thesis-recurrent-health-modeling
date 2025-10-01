@@ -1,0 +1,83 @@
+from enum import Enum
+
+## MIMIC-III Data Types
+class DiseaseType(Enum):
+    """
+    Enum class for disease types based on Charlson Comorbidity Index.
+    """
+    MYOCARDIAL_INFARCT = "myocardial_infarct"
+    CONGESTIVE_HEART_FAILURE = "congestive_heart_failure"
+    PERIPHERAL_VASCULAR_DISEASE = "peripheral_vascular_disease"
+    CEREBROVASCULAR_DISEASE = "cerebrovascular_disease"
+    DEMENTIA = "dementia"
+    CHRONIC_PULMONARY_DISEASE = "chronic_pulmonary_disease"
+    RHEUMATIC_DISEASE = "rheumatic_disease"
+    PEPTIC_ULCER_DISEASE = "peptic_ulcer_disease"
+    MILD_LIVER_DISEASE = "mild_liver_disease"
+    DIABETES_WITHOUT_COMPLICATION = "diabetes_without_cc"
+    DIABETES_WITH_COMPLICATION = "diabetes_with_cc"
+    PARAPLEGIA = "paraplegia"
+    RENAL_DISEASE = "renal_disease"
+    MALIGNANT_CANCER = "malignant_cancer"
+    SEVERE_LIVER_DISEASE = "severe_liver_disease"
+    METASTATIC_SOLID_TUMOR = "metastatic_solid_tumor"
+    AIDS = "aids"
+    OTHER = "other"
+    
+class AdmissionType(Enum):
+    """
+    Enum class for admission types.
+    """
+    URGENT = "URGENT"
+    ELECTIVE = "ELECTIVE"
+    EMERGENCY = "EMERGENCY"
+    NEWBORN = "NEWBORN"
+
+## Drug Relapse Data Types
+class DrugClass(Enum):
+    """
+    Enum class for drug classes.
+    """
+    AMPHETAMINES = "Amphetamines"
+    BENZODIAZEPINES = "Benzodiazepines"
+    OPIATES = "Opiates"
+    COCAINE = "Cocaine"
+    ALCOHOL = "Alcohol"
+    FENTANYL = "Fentanyl"
+    DISSOCIATIVE_ANESTHETICS = "Dissociative Anesthetics"
+    BARBITURATES = "Barbiturates"
+    METHADONE = "Methadone"
+    CANNABINOIDS = "Cannabinoids"
+    OPIOIDS = "Opioids"
+    BUPRENORPHINE = "Buprenorphine"
+    ZOLPIDEM = "Zolpidem"
+    ANTICONVULSANTS = "Anticonvulsants"
+    OTHER = "Other"
+    LSD = "LSD"
+    KRATOM = "Kratom"
+    KETAMINE = "Ketamine"
+    OPIOID_ANTAGONISTS = "Opioid Antagonists"
+    METABOLITES = "Metabolites"
+    THC = "THC"
+
+class ProgramType(Enum):
+    """
+    Enum class for program types.
+    """
+    FAMILY_COURT = "Family Court"
+    PROBATION = "Probation"
+    TREATMENT = "Treatment"
+    DRUG_COURT = "Drug Court"
+    GENERAL = "General"
+    MENTAL_HEALTH = "Mental Health"
+    JUVENILE_COURT = "Juvenile Court"
+    PAROLE = "Parole"
+    DWI_COURT = "DWI Court"
+    VETERANS_COURT = "Veterans Court"
+    PRETRIAL = "Pretrial"
+    WORKPLACE = "Workplace"
+    CO_OCCURRING_COURT = "Co-Occuring Court"
+    ASSOCIATIONS = "Associations"
+    ORP = "ORP"
+    DEMO = "Demo"
+    INDUSTRY = "Industry"

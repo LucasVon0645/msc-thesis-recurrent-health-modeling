@@ -1,0 +1,119 @@
+mimic:
+  hidden_markov:
+    save_model_path: /workspaces/master-thesis-recurrent-health-events-prediction/_models/mimic/hmm
+    model_name: hmm_cat_readmisison_time_alone
+    add_distribution_params:
+      READMISSION_TIME_CAT:
+        bins:
+        - 0
+        - 30
+        - 120
+        labels:
+        - 0-30
+        - 30-120
+        - 120+
+        n_categories: 3
+    features:
+      READMISSION_TIME_CAT: categorical
+    hidden_state_labels:
+      - high
+      - medium
+      - low
+    feature_define_state_labels: READMISSION_TIME_CAT
+    n_states: 3
+    use_only_sequences_gte_2_steps: False
+    id_col: SUBJECT_ID
+    event_id_col: HADM_ID
+    time_col: ADMITTIME
+    continuous_event_time_col: LOG_DAYS_UNTIL_NEXT_HOSPITALIZATION
+    event_name: readmission
+    event_time_cat_col: READMISSION_TIME_CAT
+    event_time_cat_order:
+      - 0-30
+      - 30-120
+      - 120+
+    event_time_feature_col: READMISSION_TIME_CAT
+  next_event_model:
+    last_event_based:
+      model_name: "survival_model"
+      model_type: null
+      save_model_path: "/workspaces/master-thesis-recurrent-health-events-prediction/_models/mimic/survival"
+      strata_col: null
+      event_col: READMISSION_EVENT
+      event_id_col: HADM_ID
+      duration_col: EVENT_DURATION
+      cluster_col: SUBJECT_ID
+      features:
+        - NUM_PREV_HOSPITALIZATIONS
+        - LOG_DAYS_IN_ICU
+        - CHARLSON_INDEX
+    hmm_based:
+      model_name: "cph_model_hmm_cov_based"
+      model_type: "cox_ph"
+      save_model_path: "/workspaces/master-thesis-recurrent-health-events-prediction/_models/mimic/hmm_survival"
+      strata_col: null
+      event_col: READMISSION_EVENT
+      event_id_col: HADM_ID
+      duration_col: EVENT_DURATION
+      cluster_col: SUBJECT_ID
+      features:
+        - NUM_PREV_HOSPITALIZATIONS
+        - LOG_DAYS_IN_ICU
+        - CHARLSON_INDEX
+relapse:
+  hidden_markov:
+    save_model_path: /workspaces/master-thesis-recurrent-health-events-prediction/_models/drug_relapse/hmm
+    model_name: hmm_binary_relapse_90_days
+    features:
+      NUM_POSITIVES_SINCE_LAST_NEGATIVE: poisson
+      LOG_TIME_SINCE_LAST_NEGATIVE: gaussian
+      RELAPSE_90_DAYS: bernoulli
+    feature_define_state_labels: RELAPSE_90_DAYS
+    n_states: 3
+    hidden_state_labels:
+      - low
+      - medium
+      - high
+    use_only_sequences_gte_2_steps: False
+    id_col: DONOR_ID
+    event_id_col: COLLECTION_ID
+    time_col: TIME
+    continuous_event_time_col: LOG_TIME_UNTIL_NEXT_POSITIVE
+    event_name: relapse
+    event_time_cat_col: RELAPSE_DURATION_CATEGORY
+    event_time_cat_order:
+      - 0-30
+      - 30-90
+      - 90-180
+      - 180+
+    event_time_feature_col: RELAPSE_90_DAYS
+    feature_define_state_labels: RELAPSE_90_DAYS
+  next_event_model:
+    last_event_based:
+      model_name: "Relapse Cox PH Model"
+      model_type: "cox_ph"
+      save_model_path: "/workspaces/master-thesis-recurrent-health-events-prediction/_models/drug_relapse/survival"
+      strata_col: null
+      event_col: RELAPSE_EVENT
+      event_id_col: COLLECTION_ID
+      duration_col: EVENT_DURATION
+      cluster_col: null
+      event_name: "relapse"
+      features:
+        - NUM_PREV_RELAPSES
+        - LOG_TIME_RELAPSE_PAST_MEAN
+        - PREV_RELAPSE_30_DAYS
+        - NUM_POSITIVES_SINCE_LAST_NEGATIVE
+        - PREV_NUM_DRUGS_POSITIVE
+        - LOG_PARTICIPATION_DAYS
+        - RANDOM_FEATURE # Add a random feature for reference
+      features_not_to_scale:
+        - PREV_RELAPSE_30_DAYS
+      evaluation_times:
+        - 30
+        - 60
+        - 90
+        - 180
+        - 270
+      main_evaluation_time: 30
+      scale_features: true
