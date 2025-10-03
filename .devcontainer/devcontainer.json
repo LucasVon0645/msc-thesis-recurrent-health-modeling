@@ -2,29 +2,32 @@
   "name": "Recurrent Health Events - Master Thesis - Dev Container",
   "build": {
     "dockerfile": "Dockerfile",
-    "context": ".." // Context is set to the parent directory to access the Dockerfile
+    "context": ".." // Keep the parent directory as context to access the Dockerfile
   },
-  "containerEnv": {
-    "LD_LIBRARY_PATH": "/usr/local/lib/R/lib:/usr/local/lib:/usr/lib/aarch64-linux-gnu"
-  },
+
+  // Removed containerEnv.LD_LIBRARY_PATH that referenced R paths
+
   "customizations": {
     "vscode": {
       "settings": {
-        "terminal.integrated.defaultProfile.linux": "bash" // Set the default terminal to bash
+        "terminal.integrated.defaultProfile.linux": "bash" // Default terminal
       },
       "extensions": [
-        "ms-python.python", // Python extension for VS Code
-        "ms-python.vscode-pylance", // Pylance for Python language support
-        "ms-toolsai.jupyter", // Jupyter extension for VS Code
-        "njpwerner.autodocstring", // AutoDocstring extension for Python
-        "ms-toolsai.vscode-ai-datawrangler", // Data Wrangler extension for AI data handling
-        "ms-azuretools.vscode-docker", // Docker extension for VS Code
-        "mhutchie.git-graph" // Git Graph extension for visualizing Git repositories
+        "ms-python.python",            // Python extension
+        "ms-python.vscode-pylance",    // Pylance
+        "ms-toolsai.jupyter",          // Jupyter
+        "njpwerner.autodocstring",     // AutoDocstring
+        "ms-toolsai.vscode-ai-datawrangler", // Data Wrangler
+        "ms-azuretools.vscode-docker", // Docker
+        "mhutchie.git-graph"           // Git Graph
       ]
     }
   },
-  "postCreateCommand": "poetry install && chmod 700 ~/.ssh && chmod 600 ~/.ssh/id_ed* && chmod 644 ~/.ssh/id_ed*.pub || true", // Command to run after the container is created, installing dependencies with Poetry
-  "remoteUser": "vscode" // User to use inside the container
-  // Features to add to the Dev Container. More info: https://containers.dev/implementors/features.
-  // "features": {}
+
+  // Removed SSH key chmods; just install deps
+  "postCreateCommand": "poetry install",
+
+  "remoteUser": "vscode" // User inside the container
+
+  // "features": {} // (optional) add dev container features here
 }
