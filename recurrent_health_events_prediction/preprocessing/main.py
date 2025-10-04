@@ -15,8 +15,12 @@ def main(dataset_name: str = "mimic"):
     preprocessing_config = config["training_data"][dataset_name]
 
     if dataset_name == "mimic":
-        data_extractor = DataExtractorMIMIC(dataset_config, [DiseaseType.CHRONIC_PULMONARY_DISEASE,
-                                                            DiseaseType.CONGESTIVE_HEART_FAILURE])
+        selected_diseases = preprocessing_config.get("selected_diseases", [DiseaseType.CHRONIC_PULMONARY_DISEASE,
+                                                            DiseaseType.CONGESTIVE_HEART_FAILURE,
+                                                            DiseaseType.DIABETES_WITH_COMPLICATION,
+                                                            DiseaseType.RENAL_DISEASE])
+        selected_diseases = [DiseaseType(d) if isinstance(d, str) else d for d in selected_diseases]
+        data_extractor = DataExtractorMIMIC(dataset_config, selected_diseases)
 
         data_extractor.load_data()
         admissions_df = data_extractor.get_admissions_df()
