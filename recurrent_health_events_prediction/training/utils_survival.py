@@ -151,7 +151,7 @@ def build_strata_col(
 def train_next_event_survival_model_rand_search_cv(
         training_df: pd.DataFrame, model_config: dict,
         strata_col_s: pd.Series,
-        param_grid: dict, n_iter=10, random_state=42, cv=5):
+        param_grid: dict, n_iter=10, random_state=42, cv=5, n_jobs=4):
     """
     Perform training with hyperparameter tuning for the NextEventSurvivalWrapper model using RandomizedSearchCV.
     Args:
@@ -198,7 +198,7 @@ def train_next_event_survival_model_rand_search_cv(
         n_iter=n_iter,
         cv=skf.split(X, strata_col_s),
         random_state=random_state,
-        n_jobs=-1,
+        n_jobs=n_jobs,
     )
 
     random_search.fit(X)
