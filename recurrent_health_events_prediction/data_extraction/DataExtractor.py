@@ -67,7 +67,7 @@ class DataExtractorMIMIC:
         subjects_id_s = self.patients_with_disease_ids
         icu_stays_df = icu_stays_df[icu_stays_df['SUBJECT_ID'].isin(subjects_id_s)]
 
-        self.icu_stays_patients_with_disease_df = icu_stays_df
+        self.icu_stays_patients_with_disease_df = icu_stays_df[self.cols_to_load_config['icu']]
 
     def _load_procedures_patients_specific_diseases(self):
         """
