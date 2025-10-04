@@ -1,6 +1,6 @@
 dataset:
   mimic:
-    path: "/workspaces/master-thesis-recurrent-health-events-prediction/data/mimic-iii-dataset"
+    path: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-dataset"
     columns_to_load:
       admission:
         - "HADM_ID"
@@ -10,6 +10,11 @@ dataset:
         - "INSURANCE"
         - "ETHNICITY"
         - "DISCHARGE_LOCATION"
+      icu:
+        - "SUBJECT_ID"
+        - "HADM_ID"
+        - "INTIME"
+        - "OUTTIME"
       patient:
         - "SUBJECT_ID"
         - "GENDER"
@@ -25,12 +30,12 @@ dataset:
         - "SUBJECT_ID"
         - "DRUG"
   relapse:
-    path: "/workspaces/master-thesis-recurrent-health-events-prediction/data/avh-data"
+    path: "/workspaces/msc-thesis-recurrent-health-modeling/data/avh-data"
     drop_no_showedup: true
     min_num_test_days: 3
 training_data:
   relapse:
-    preprocessed_path: "/workspaces/master-thesis-recurrent-health-events-prediction/data/avh-data-preprocessed"
+    preprocessed_path: "/workspaces/msc-thesis-recurrent-health-modeling/data/avh-data-preprocessed"
     log_cols_to_add:
     - "TIME_SINCE_LAST_NEGATIVE"
     - "TIME_SINCE_LAST_POSITIVE"
@@ -62,12 +67,18 @@ training_data:
     binary_event_col: "RELAPSE_30_DAYS"
     binary_threshold: 30 # in days
   synthetic:
-    preprocessed_path: "/workspaces/master-thesis-recurrent-health-events-prediction/data/synthetic_hmm"
+    preprocessed_path: "/workspaces/msc-thesis-recurrent-health-modeling/data/synthetic_hmm"
   mimic:
-    preprocessed_path: "/workspaces/master-thesis-recurrent-health-events-prediction/data/mimic-iii-preprocessed/copd_heart_failure"
+    preprocessed_path: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes"
+    training_data_path: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes/mimic_cleaned_v2/all_events.csv"
     admission_types_to_consider: Null
     censoring_limit: 120 # in days
     consider_death_after_discharge_gt: 365 # in days
+    selected_diseases:
+      - "chronic_pulmonary_disease"
+      - "congestive_heart_failure"
+      - "diabetes_with_cc"
+      - "renal_disease"
     filters:
       AGE:
         min: 18 # in years
@@ -75,7 +86,7 @@ training_data:
       HOSPITALIZATION_DAYS:
         max: 180 # in days
       READMISSION_TIME:
-        min: 2 # in days
+        min: 1 # in days
     clip_features:
       HOSPITALIZATION_DAYS:
         min: 0.5 # in days
@@ -98,8 +109,8 @@ training_data:
     binary_event_col: "READMISSION_30_DAYS"
     binary_threshold: 30 # in days
 final_results:
-    mimic_path: "/workspaces/master-thesis-recurrent-health-events-prediction/results/mimic"
-    relapse_path: "/workspaces/master-thesis-recurrent-health-events-prediction/results/drug_relapse"
+    mimic_path: "/workspaces/msc-thesis-recurrent-health-modeling/results/mimic"
+    relapse_path: "/workspaces/msc-thesis-recurrent-health-modeling/results/drug_relapse"
 neptune:
-  token_file_path: "/workspaces/master-thesis-recurrent-health-events-prediction/.neptune-token"
+  token_file_path: "/workspaces/msc-thesis-recurrent-health-modeling/.neptune-token"
   project: "LucasAncken-MasterThesis/RecurrentHealthEventsPrediction"  # replace with your Neptune project

@@ -1,6 +1,6 @@
 mimic:
   hidden_markov:
-    save_model_path: /workspaces/master-thesis-recurrent-health-events-prediction/_models/mimic/hmm
+    save_model_path: /workspaces/msc-thesis-recurrent-health-modeling/_models/mimic/hmm
     model_name: hmm_cat_readmisison_time_alone
     add_distribution_params:
       READMISSION_TIME_CAT:
@@ -37,7 +37,7 @@ mimic:
     last_event_based:
       model_name: "survival_model"
       model_type: null
-      save_model_path: "/workspaces/master-thesis-recurrent-health-events-prediction/_models/mimic/survival"
+      save_model_path: "/workspaces/msc-thesis-recurrent-health-modeling/_models/mimic/survival"
       strata_col: null
       event_col: READMISSION_EVENT
       event_id_col: HADM_ID
@@ -50,7 +50,7 @@ mimic:
     hmm_based:
       model_name: "cph_model_hmm_cov_based"
       model_type: "cox_ph"
-      save_model_path: "/workspaces/master-thesis-recurrent-health-events-prediction/_models/mimic/hmm_survival"
+      save_model_path: "/workspaces/msc-thesis-recurrent-health-modeling/_models/mimic/hmm_survival"
       strata_col: null
       event_col: READMISSION_EVENT
       event_id_col: HADM_ID
@@ -62,7 +62,7 @@ mimic:
         - CHARLSON_INDEX
 relapse:
   hidden_markov:
-    save_model_path: /workspaces/master-thesis-recurrent-health-events-prediction/_models/drug_relapse/hmm
+    save_model_path: /workspaces/msc-thesis-recurrent-health-modeling/_models/drug_relapse/hmm
     model_name: hmm_binary_relapse_90_days
     features:
       NUM_POSITIVES_SINCE_LAST_NEGATIVE: poisson
@@ -92,7 +92,7 @@ relapse:
     last_event_based:
       model_name: "Relapse Cox PH Model"
       model_type: "cox_ph"
-      save_model_path: "/workspaces/master-thesis-recurrent-health-events-prediction/_models/drug_relapse/survival"
+      save_model_path: "/workspaces/msc-thesis-recurrent-health-modeling/_models/drug_relapse/survival"
       strata_col: null
       event_col: RELAPSE_EVENT
       event_id_col: COLLECTION_ID
