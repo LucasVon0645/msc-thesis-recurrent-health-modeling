@@ -70,7 +70,34 @@ training_data:
     preprocessed_path: "/workspaces/msc-thesis-recurrent-health-modeling/data/synthetic_hmm"
   mimic:
     preprocessed_path: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes"
-    training_data_path: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes/mimic_cleaned_v2/all_events.csv"
+    data_directory: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes/mimic_cleaned_v2"
+    features_to_scale:
+      - "AGE"
+      - "LOG_HOSPITALIZATION_DAYS"
+      - "LOG_DAYS_IN_ICU"
+      - "LOG_DAYS_UNTIL_NEXT_HOSPITALIZATION"
+      - "LOG_NUM_DRUGS"
+      - "NUM_PROCEDURES"
+      - "CHARLSON_INDEX"
+      - "NUM_PREV_HOSPITALIZATIONS"
+      - "NUM_COMORBIDITIES"
+      - "PARTICIPATION_DAYS"
+    features_to_one_hot_encode:
+      - "ADMISSION_TYPE"
+      - "INSURANCE"
+      - "ETHNICITY"
+      - "DISCHARGE_LOCATION"
+    one_hot_cols_to_drop:
+      - "GENDER_F"
+      - "INSURANCE_SELF_PAY"
+      - "ETHNICITY_OTHER"
+      - "ADMISSION_TYPE_EMERGENCY"
+      - "DISCHARGE_LOCATION_OTHERS"
+    patient_id_col: "SUBJECT_ID"
+    time_col: "ADMITTIME"
+    next_admt_type_col: "NEXT_ADMISSION_TYPE"
+    hosp_id_col: "HADM_ID"
+    no_elective: true
     admission_types_to_consider: Null
     censoring_limit: 120 # in days
     consider_death_after_discharge_gt: 365 # in days
