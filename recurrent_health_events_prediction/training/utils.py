@@ -1,3 +1,5 @@
+import os
+import joblib
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -7,6 +9,7 @@ import shap
 from typing import Optional, Sequence, Tuple
 from pathlib import Path
 from sklearn.model_selection import StratifiedShuffleSplit, ShuffleSplit
+from sklearn.preprocessing import StandardScaler
 
 
 
@@ -203,10 +206,10 @@ def preprocess_features_to_one_hot_encode(
     one_hot_cols_to_drop: Optional[list] = None,
 ):
     """
-    Preprocess MIMIC features to encode and drop specified values.
+    Preprocess features to encode and drop specified values.
 
     Args:
-        df (pd.DataFrame): DataFrame containing MIMIC features.
+        df (pd.DataFrame): DataFrame containing features.
         features_to_encode (list): List of features to one-hot encode.
         values_to_drop (list, optional): Values to drop from the DataFrame.
 
@@ -314,7 +317,6 @@ def make_train_test_split_file(
     split_map.to_csv(out_path, index=False)
 
     return split_map
-
 
 def apply_train_test_split_file_classification(
     df: pd.DataFrame,
@@ -439,3 +441,27 @@ def apply_train_test_split_file_survival(
     test_ids  = df_merged.loc[test_mask,  id_col].values
 
     return X_train, X_test, train_ids, test_ids
+
+def standard_scale_data(
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    feature_cols: Optional[list[str]] = None,
+    save_scaler_dir_path: Optional[str] = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    if feature_cols is None:
+        feature_cols = X_train.columns.tolist()
+
+    scaler = StandardScaler()
+    X_train_scaled = X_train.copy()
+    X_test_scaled = X_test.copy()
+
+    X_train_scaled[feature_cols] = scaler.fit_transform(X_train[feature_cols])
+    X_test_scaled[feature_cols] = scaler.transform(X_test[feature_cols])
+
+    if save_scaler_dir_path is not None:
+        filepath = os.path.join(save_scaler_dir_path, 'scaler.joblib')
+        print(f"Saving scaler to {filepath}")
+        os.makedirs(save_scaler_dir_path, exist_ok=True)
+        joblib.dump(scaler, filepath)
+
+    return X_train_scaled, X_test_scaled
