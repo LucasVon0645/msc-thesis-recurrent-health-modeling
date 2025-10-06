@@ -442,6 +442,11 @@ def apply_train_test_split_file_survival(
 
     return X_train, X_test, train_ids, test_ids
 
+def make_tb_writer(log_dir: str | None = None) -> SummaryWriter:
+    # e.g., logs go under runs/gru_model_run/<timestamp>
+    return SummaryWriter(log_dir=log_dir)
+
+
 def standard_scale_data(
     X_train: pd.DataFrame,
     X_test: pd.DataFrame,
