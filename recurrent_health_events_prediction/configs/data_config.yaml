@@ -69,8 +69,8 @@ training_data:
   synthetic:
     preprocessed_path: "/workspaces/msc-thesis-recurrent-health-modeling/data/synthetic_hmm"
   mimic:
-    preprocessed_path: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes"
-    data_directory: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes/mimic_cleaned_v2"
+    preprocessed_output_path_1st_round: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes"
+    data_directory: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes"
     tensorboard_log_dir: "/workspaces/msc-thesis-recurrent-health-modeling/_runs"
     features_to_scale:
       - "AGE"
@@ -84,6 +84,7 @@ training_data:
       - "NUM_COMORBIDITIES"
       - "PARTICIPATION_DAYS"
     features_to_one_hot_encode:
+      - "GENDER"
       - "ADMISSION_TYPE"
       - "INSURANCE"
       - "ETHNICITY"
@@ -125,6 +126,7 @@ training_data:
       - "DAYS_UNTIL_NEXT_HOSPITALIZATION"
       - "DAYS_SINCE_LAST_HOSPITALIZATION"
       - "NUM_PREV_HOSPITALIZATIONS"
+      - "PARTICIPATION_DAYS"
       - "NUM_DRUGS"
     event_duration_bins:
     - 0

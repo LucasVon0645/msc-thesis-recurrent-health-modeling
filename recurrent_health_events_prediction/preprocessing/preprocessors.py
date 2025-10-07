@@ -33,15 +33,19 @@ class DataPreprocessorMIMIC:
 
         print("Categorizing readmission time...")
         events_df = self._categorize_readmission_time(events_df)
-
+        
+        print("Reordering columns...")
         # Reorder columns for better organization
         events_df = self._reorder_columns(events_df)
         # Split the DataFrame into last events and historical events
         print("Splitting last and historical events...")
         historical_events_df, last_events_df = self._split_last_and_historical_events(events_df)
+        
+        all_events_df = pd.concat([historical_events_df, last_events_df], ignore_index=True)
+        all_events_df = all_events_df.sort_values(by=["SUBJECT_ID", "ADMITTIME"]).reset_index(drop=True)
 
         # Save the processed data
-        self.save_training_data(historical_events_df, last_events_df, events_df, self.config["preprocessed_path"])
+        self.save_training_data(historical_events_df, last_events_df, all_events_df, self.config["preprocessed_output_path_1st_round"])
 
     def _define_last_events_old(self, events_df: pd.DataFrame):
         """

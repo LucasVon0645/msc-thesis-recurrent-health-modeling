@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence
+from collections import OrderedDict
 
 class GRUNet(nn.Module):
     """
@@ -38,12 +39,12 @@ class GRUNet(nn.Module):
         )
 
         # head over [summary_past || x_current]
-        self.classifier_head = nn.Sequential(
-            nn.Linear(hidden_size_seq + input_size_curr, hidden_size_head),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_size_head, 1),
-        )
+        self.classifier_head = nn.Sequential(OrderedDict([
+            ("fc1", nn.Linear(hidden_size_seq + input_size_curr, hidden_size_head)),
+            ("relu1", nn.ReLU()),
+            ("dropout1", nn.Dropout(dropout)),
+            ("fc2", nn.Linear(hidden_size_head, 1)),
+        ]))
 
     def forward(self,
                 x_current: torch.Tensor,

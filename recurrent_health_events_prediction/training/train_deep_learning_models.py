@@ -5,33 +5,30 @@ import yaml
 from typing import Optional, Tuple
 
 import neptune
+#from neptune_tensorboard import enable_tensorboard_logging
 import pandas as pd
 import torch
 import torchmetrics
 from torch.utils.tensorboard import SummaryWriter
 
-
 from recurrent_health_events_prediction import configs
 from recurrent_health_events_prediction.datasets.HospReadmDataset import (
     HospReadmDataset,
 )
-from recurrent_health_events_prediction.preprocessing.utils import (
-    remap_discharge_location,
-    remap_mimic_races,
-)
-from recurrent_health_events_prediction.training.utils import (
-    preprocess_features_to_one_hot_encode,
-    standard_scale_data,
-)
+from recurrent_health_events_prediction.training.utils import standard_scale_data
 from recurrent_health_events_prediction.utils.general_utils import import_yaml_config
-from recurrent_health_events_prediction.utils.neptune_utils import add_model_config_to_neptune, initialize_neptune_run, upload_model_to_neptune
+from recurrent_health_events_prediction.utils.neptune_utils import (
+    add_model_config_to_neptune,
+    initialize_neptune_run,
+    upload_model_to_neptune,
+)
 
 
-def create_preprocessed_data(
+def scale_preprocessed_data(
     data_directory: str, training_data_config: dict, save_scaler_dir_path: str = None
 ):
     """
-    Load and preprocess data for training and testing.
+    Scale preprocessed data for training and testing.
 
     Args:
         data_directory (str): Directory containing the dataset.
@@ -45,30 +42,11 @@ def create_preprocessed_data(
     train_df = pd.read_csv(train_file_path)
     test_df = pd.read_csv(test_file_path)
 
-    train_df = remap_discharge_location(train_df)
-    train_df = remap_mimic_races(train_df)
-    test_df = remap_discharge_location(test_df)
-    test_df = remap_mimic_races(test_df)
-
     # Preprocess
     features_to_scale = training_data_config["features_to_scale"]
-    features_to_one_hot_encode = training_data_config["features_to_one_hot_encode"]
-    one_hot_cols_to_drop = training_data_config["one_hot_cols_to_drop"]
 
     train_scaled_df, test_scaled_df = standard_scale_data(
         train_df, test_df, features_to_scale, save_scaler_dir_path=save_scaler_dir_path
-    )
-
-    train_preprocessed_df, _ = preprocess_features_to_one_hot_encode(
-        train_scaled_df,
-        features_to_encode=features_to_one_hot_encode,
-        one_hot_cols_to_drop=one_hot_cols_to_drop,
-    )
-
-    test_preprocessed_df, _ = preprocess_features_to_one_hot_encode(
-        test_scaled_df,
-        features_to_encode=features_to_one_hot_encode,
-        one_hot_cols_to_drop=one_hot_cols_to_drop,
     )
 
     train_preprocessed_file_path = os.path.join(
@@ -78,8 +56,8 @@ def create_preprocessed_data(
         data_directory, "test_events_preprocessed.csv"
     )
 
-    train_preprocessed_df.to_csv(train_preprocessed_file_path, index=False)
-    test_preprocessed_df.to_csv(test_preprocessed_file_path, index=False)
+    train_scaled_df.to_csv(train_preprocessed_file_path, index=False)
+    test_scaled_df.to_csv(test_preprocessed_file_path, index=False)
 
     return train_preprocessed_file_path, test_preprocessed_file_path
 
@@ -112,10 +90,10 @@ def get_train_test_datasets(
         "label_col": training_data_config.get(
             "binary_event_col", "READMISSION_30_DAYS"
         ),
-        "next_admt_type_col": model_config.get(
+        "next_admt_type_col": training_data_config.get(
             "next_admt_type_col", "NEXT_ADMISSION_TYPE"
         ),
-        "hosp_id_col": model_config.get("hosp_id_col", "HADM_ID"),
+        "hosp_id_col": training_data_config.get("hosp_id_col", "HADM_ID"),
     }
 
     # Create datasets
@@ -143,17 +121,9 @@ def train(
         Trained model and training loss history.
     """
 
-    train_dataloader = torch.utils.data.DataLoader(
+    train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=model_config["batch_size"], shuffle=True
     )
-    
-    if writer is not None:
-        sample_loader = torch.utils.data.DataLoader(train_dataset, batch_size=model_config["batch_size"], shuffle=True)
-        x_current, x_past, mask_past, _ = next(iter(sample_loader))
-        try:
-            writer.add_graph(model, (x_current, x_past, mask_past))
-        except Exception as e:
-            print(f"Skipping add_graph due to: {e}")
 
     # Initialize model
     if ModelClass is not None:
@@ -175,6 +145,20 @@ def train(
             )
 
     model: torch.nn.Module = ModelClass(**model_config["model_params"])
+    
+    # once, right after you create `train_loader` and move `model` to device
+    if writer is not None:
+        model.eval()
+        with torch.no_grad():
+            x_current, x_past, mask_past, _ = next(iter(train_loader))
+            device = next(model.parameters()).device
+            x_current, x_past, mask_past = (x_current.to(device), x_past.to(device), mask_past.to(device))
+            try:
+                writer.add_graph(model, (x_current, x_past, mask_past))
+            except Exception as e:
+                print(f"Skipping add_graph due to: {e}")
+        model.train()
+
 
     print("\nModel initialized and ready for training.")
     print("Model parameters:")
@@ -200,7 +184,7 @@ def train(
     for epoch in range(model_config["num_epochs"]):
         model.train()
         epoch_loss = 0.0
-        for batch in train_dataloader:
+        for batch in train_loader:
             x_current, x_past, mask_past, labels = batch
             optimizer.zero_grad()
             outputs_logits = model(x_current, x_past, mask_past).squeeze(-1)
@@ -209,7 +193,7 @@ def train(
             optimizer.step()
             epoch_loss += loss.item()
         
-        avg_epoch_loss = epoch_loss / len(train_dataloader)
+        avg_epoch_loss = epoch_loss / len(train_loader)
         loss_over_epochs.append(avg_epoch_loss)
         print(
             f"Epoch {epoch + 1}/{model_config['num_epochs']}, Loss: {avg_epoch_loss}"
@@ -285,9 +269,11 @@ def evaluate(
 
     return {"accuracy": accuracy, "f1_score": f1, "auroc": auroc}
 
+
 def make_tb_writer(log_dir: str | None = None) -> SummaryWriter:
     # e.g., logs go under runs/gru_model_run/<timestamp>
     return SummaryWriter(log_dir=log_dir)
+
 
 def prepare_train_test_datasets(
     data_directory: str,
@@ -303,7 +289,7 @@ def prepare_train_test_datasets(
     Returns:
         train_dataset, test_dataset, train_df_path, test_df_path
     """
-
+    print("Preparing train and test datasets...")
     # Paths to preprocessed CSVs
     train_df_path = os.path.join(data_directory, "train_events_preprocessed.csv")
     test_df_path = os.path.join(data_directory, "test_events_preprocessed.csv")
@@ -313,7 +299,7 @@ def prepare_train_test_datasets(
         or not os.path.exists(test_df_path)
         or overwrite_preprocessed
     ):
-        train_df_path, test_df_path = create_preprocessed_data(
+        train_df_path, test_df_path = scale_preprocessed_data(
             data_directory,
             training_data_config,
             save_scaler_dir_path=save_scaler_dir_path,
@@ -328,8 +314,8 @@ def prepare_train_test_datasets(
         and not overwrite_preprocessed
     ):
         print("Loading existing PyTorch datasets...")
-        train_dataset = torch.load(pytorch_train_dataset_path)
-        test_dataset = torch.load(pytorch_test_dataset_path)
+        train_dataset = torch.load(pytorch_train_dataset_path, weights_only=False)
+        test_dataset = torch.load(pytorch_test_dataset_path, weights_only=False)
     else:
         print("Creating new PyTorch datasets...")
 
@@ -350,6 +336,7 @@ def prepare_train_test_datasets(
 
     return train_dataset, test_dataset, train_df_path, test_df_path
 
+
 def main(
     model_config_path: str,
     save_scaler_dir_path: str,
@@ -358,6 +345,9 @@ def main(
     neptune_tags: Optional[list[str]] = None,
     neptune_run_name: str = "deep_learning_model_run",
 ):
+    print("Starting training script...")
+    print("Logging in Neptune:", log_in_neptune)
+    
     data_config_path = (impresources.files(configs) / "data_config.yaml")
 
     with open(data_config_path) as f:
@@ -370,6 +360,10 @@ def main(
     model_config_dir_path = os.path.dirname(model_config_path)
     model_name = os.path.basename(model_config_dir_path)
 
+    print(f"Using model config from: {model_config_path}")
+    print(f"Model name: {model_name}")
+    print(f"Data directory: {data_directory}")
+    
     model_params_dict = model_config['model_params']
     assert model_params_dict["input_size_curr"] == len(
         model_config["current_feat_cols"]
@@ -389,6 +383,7 @@ def main(
     if neptune_run:
         add_model_config_to_neptune(neptune_run, model_config)
         neptune_run["train/data_directory"] = data_directory
+        #enable_tensorboard_logging(neptune_run)
 
     # Prepare datasets (load existing or create + save new)
     train_dataset, test_dataset, _, _ = prepare_train_test_datasets(
@@ -400,6 +395,7 @@ def main(
         overwrite_preprocessed=overwrite_preprocessed,
     )
 
+    print("Initializing TensorBoard writer...")
     # Create TensorBoard writer (log dir name matches your run name)
     base_log_dir = training_data_config.get("tensorboard_log_dir", "_runs")
     writer = make_tb_writer(log_dir=f"{base_log_dir}/{neptune_run_name}")
@@ -408,9 +404,10 @@ def main(
 
     model, _ = train(train_dataset, model_config, neptune_run=neptune_run, writer=writer)
 
+    print("Saving trained model...")
     # Save the trained model
     model_save_path = os.path.join(
-        model_config["model_config_dir_path"], f"{model_name}_model.pth"
+        model_config_dir_path, f"{model_name}_model.pth"
     )
     torch.save(model.state_dict(), model_save_path)
     print(f"Trained model saved to {model_save_path}")
@@ -436,12 +433,13 @@ def main(
 
 
 if __name__ == "__main__":
+    print("Imports complete. Running main...")
     model_name = "gru"
     save_scaler_dir_path = f"/workspaces/msc-thesis-recurrent-health-modeling/_models/mimic/deep_learning/scalers"
     model_config_path = f"/workspaces/msc-thesis-recurrent-health-modeling/_models/mimic/deep_learning/{model_name}/{model_name}_config.yaml"
     overwrite_preprocessed = False
 
-    LOG_IN_NEPTUNE = True
+    LOG_IN_NEPTUNE = False
     neptune_run_name = f"{model_name}_model_run"
     neptune_tags = ["deep_learning", "all_patients", "mimic"]
 
