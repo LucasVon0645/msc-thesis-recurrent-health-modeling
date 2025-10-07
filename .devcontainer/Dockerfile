@@ -16,7 +16,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     make \
     wget \
     llvm \
-    # Python build deps
     libssl-dev \
     zlib1g-dev \
     libbz2-dev \
@@ -27,13 +26,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tk-dev \
     libffi-dev \
     liblzma-dev \
-    # helpful/required for some tooling
     libxml2-dev \
     libxmlsec1-dev \
-    software-properties-common \
     gnupg2 \
     lsb-release \
-    # use system python3 only to bootstrap Poetry installer
     python3 \
     python3-venv \
     python3-pip \
@@ -52,6 +48,3 @@ RUN curl https://pyenv.run | bash \
 # Install Poetry (creates in ~/.local/bin)
 RUN curl -sSL https://install.python-poetry.org | python3 - \
  && poetry config virtualenvs.in-project true
-
-# Default command
-CMD [ "poetry", "shell" ]
