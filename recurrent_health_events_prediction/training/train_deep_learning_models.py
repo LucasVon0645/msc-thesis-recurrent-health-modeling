@@ -146,6 +146,14 @@ def train(
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset, batch_size=model_config["batch_size"], shuffle=True
     )
+    
+    if writer is not None:
+        sample_loader = torch.utils.data.DataLoader(train_dataset, batch_size=model_config["batch_size"], shuffle=True)
+        x_current, x_past, mask_past, _ = next(iter(sample_loader))
+        try:
+            writer.add_graph(model, (x_current, x_past, mask_past))
+        except Exception as e:
+            print(f"Skipping add_graph due to: {e}")
 
     # Initialize model
     if ModelClass is not None:
@@ -200,12 +208,25 @@ def train(
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
-        loss_over_epochs.append(epoch_loss / len(train_dataloader))
+        
+        avg_epoch_loss = epoch_loss / len(train_dataloader)
+        loss_over_epochs.append(avg_epoch_loss)
         print(
-            f"Epoch {epoch + 1}/{model_config['num_epochs']}, Loss: {epoch_loss / len(train_dataloader)}"
+            f"Epoch {epoch + 1}/{model_config['num_epochs']}, Loss: {avg_epoch_loss}"
         )
         if neptune_run:
-            neptune_run.log_metric("train/loss", epoch_loss / len(train_dataloader))
+            neptune_run.log_metric("train/loss", avg_epoch_loss)
+        
+        # Log to TensorBoard (new)
+        if writer is not None:
+            writer.add_scalar("train/loss", avg_epoch_loss, epoch + 1)
+
+            # Weights & grad histograms (per epoch)
+            for name, param in model.named_parameters():
+                if param.requires_grad and param.data is not None:
+                    writer.add_histogram(f"weights/{name}", param.data, epoch + 1)
+                if param.grad is not None:
+                    writer.add_histogram(f"grads/{name}", param.grad, epoch + 1)
 
     print("\nTraining complete.")
 
@@ -268,6 +289,67 @@ def make_tb_writer(log_dir: str | None = None) -> SummaryWriter:
     # e.g., logs go under runs/gru_model_run/<timestamp>
     return SummaryWriter(log_dir=log_dir)
 
+def prepare_train_test_datasets(
+    data_directory: str,
+    training_data_config: dict,
+    model_config: dict,
+    model_config_dir_path: str,
+    save_scaler_dir_path: str | None = None,
+    overwrite_preprocessed: bool = False,
+) -> tuple:
+    """
+    Load or create preprocessed train/test CSVs and corresponding PyTorch datasets.
+
+    Returns:
+        train_dataset, test_dataset, train_df_path, test_df_path
+    """
+
+    # Paths to preprocessed CSVs
+    train_df_path = os.path.join(data_directory, "train_events_preprocessed.csv")
+    test_df_path = os.path.join(data_directory, "test_events_preprocessed.csv")
+
+    if (
+        not os.path.exists(train_df_path)
+        or not os.path.exists(test_df_path)
+        or overwrite_preprocessed
+    ):
+        train_df_path, test_df_path = create_preprocessed_data(
+            data_directory,
+            training_data_config,
+            save_scaler_dir_path=save_scaler_dir_path,
+        )
+
+    pytorch_train_dataset_path = os.path.join(model_config_dir_path, "train_dataset.pt")
+    pytorch_test_dataset_path = os.path.join(model_config_dir_path, "test_dataset.pt")
+
+    if (
+        os.path.exists(pytorch_train_dataset_path)
+        and os.path.exists(pytorch_test_dataset_path)
+        and not overwrite_preprocessed
+    ):
+        print("Loading existing PyTorch datasets...")
+        train_dataset = torch.load(pytorch_train_dataset_path)
+        test_dataset = torch.load(pytorch_test_dataset_path)
+    else:
+        print("Creating new PyTorch datasets...")
+
+        train_dataset, test_dataset = get_train_test_datasets(
+            train_df_path,
+            test_df_path,
+            model_config,
+            training_data_config=training_data_config,
+        )
+
+        # Ensure target directory exists
+        os.makedirs(model_config_dir_path, exist_ok=True)
+
+        torch.save(train_dataset, pytorch_train_dataset_path)
+        torch.save(test_dataset, pytorch_test_dataset_path)
+
+        print(f"Saved PyTorch datasets to {model_config_dir_path}")
+
+    return train_dataset, test_dataset, train_df_path, test_df_path
+
 def main(
     model_config_path: str,
     save_scaler_dir_path: str,
@@ -285,6 +367,8 @@ def main(
     data_directory = training_data_config["data_directory"]
 
     model_config = import_yaml_config(model_config_path)
+    model_config_dir_path = os.path.dirname(model_config_path)
+    model_name = os.path.basename(model_config_dir_path)
 
     model_params_dict = model_config['model_params']
     assert model_params_dict["input_size_curr"] == len(
@@ -306,52 +390,19 @@ def main(
         add_model_config_to_neptune(neptune_run, model_config)
         neptune_run["train/data_directory"] = data_directory
 
-    # Load and preprocess data
-    train_df_path = os.path.join(data_directory, "train_events_preprocessed.csv")
-    test_df_path = os.path.join(data_directory, "test_events_preprocessed.csv")
-    if (
-        not os.path.exists(train_df_path)
-        or not os.path.exists(test_df_path)
-        or overwrite_preprocessed
-    ):
-        train_df_path, test_df_path = create_preprocessed_data(
-            data_directory,
-            training_data_config,
-            save_scaler_dir_path=save_scaler_dir_path,
-        )
-
-    pytorch_train_dataset_path = os.path.join(
-        model_config["model_config_dir_path"], "train_dataset.pt"
+    # Prepare datasets (load existing or create + save new)
+    train_dataset, test_dataset, _, _ = prepare_train_test_datasets(
+        data_directory=data_directory,
+        training_data_config=training_data_config,
+        model_config=model_config,
+        model_config_dir_path=model_config_dir_path,
+        save_scaler_dir_path=save_scaler_dir_path,
+        overwrite_preprocessed=overwrite_preprocessed,
     )
-    pytorch_test_dataset_path = os.path.join(
-        model_config["model_config_dir_path"], "test_dataset.pt"
-    )
-
-    if (
-        os.path.exists(pytorch_train_dataset_path)
-        and os.path.exists(pytorch_test_dataset_path)
-        and not overwrite_preprocessed
-    ):
-        print("Loading existing PyTorch datasets...")
-        train_dataset = torch.load(pytorch_train_dataset_path)
-        test_dataset = torch.load(pytorch_test_dataset_path)
-    else:
-        print("Creating new PyTorch datasets...")
-
-        train_dataset, test_dataset = get_train_test_datasets(
-            train_df_path,
-            test_df_path,
-            model_config,
-            training_data_config=training_data_config,
-        )
-
-        torch.save(train_dataset, pytorch_train_dataset_path)
-        torch.save(test_dataset, pytorch_test_dataset_path)
-
-        print(f"Saved PyTorch datasets to {model_config['model_config_dir_path']}")
 
     # Create TensorBoard writer (log dir name matches your run name)
-    writer = make_tb_writer(log_dir=f"runs/{neptune_run_name}")
+    base_log_dir = training_data_config.get("tensorboard_log_dir", "_runs")
+    writer = make_tb_writer(log_dir=f"{base_log_dir}/{neptune_run_name}")
     
     # Train model
 
@@ -372,6 +423,9 @@ def main(
     # Log eval scalars to TensorBoard
     for k, v in eval_results.items():
         writer.add_scalar(f"eval/{k}", v)
+
+    writer.flush()
+    writer.close()
     
     if neptune_run:
         for metric_name, metric_value in eval_results.items():

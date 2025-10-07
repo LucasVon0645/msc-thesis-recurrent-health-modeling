@@ -71,6 +71,7 @@ training_data:
   mimic:
     preprocessed_path: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes"
     data_directory: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes/mimic_cleaned_v2"
+    tensorboard_log_dir: "/workspaces/msc-thesis-recurrent-health-modeling/_runs"
     features_to_scale:
       - "AGE"
       - "LOG_HOSPITALIZATION_DAYS"
