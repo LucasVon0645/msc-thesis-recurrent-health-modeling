@@ -159,7 +159,7 @@ def format_feature_value(val):
 def plot_subject_evolution(df, subject_id,
                            features_to_plot: Optional[list] = None,
                            save_html_file_path: Optional[str] = None,
-                           textposition='outside', extend_time_horizon_by=365):
+                           textposition='outside', extend_time_horizon_by=365, show: bool = False):
     # Filter for the patient
     patient_df = df[df['SUBJECT_ID'] == subject_id].copy()
     patient_df = patient_df.sort_values('ADMITTIME')
@@ -219,7 +219,10 @@ def plot_subject_evolution(df, subject_id,
         fig.write_html(save_html_file_path)
         print(f"Plot saved as {save_html_file_path}")
 
-    fig.show()
+    if show:
+        fig.show()
+
+    return fig
 
 def plot_hidden_risk_states_patient(patient_sequence, labels, colors, save_html_file_path: Optional[str] = None):
     # Create the line plot

@@ -10,7 +10,7 @@ from typing import Optional, Sequence, Tuple
 from pathlib import Path
 from sklearn.model_selection import StratifiedShuffleSplit, ShuffleSplit
 from sklearn.preprocessing import StandardScaler
-
+from plotly import graph_objects as go
 
 
 def summarize_search_results(search_cv, print_results: bool = True, model_name: str = "Model"):
@@ -465,3 +465,28 @@ def standard_scale_data(
         joblib.dump(scaler, filepath)
 
     return X_train_scaled, X_test_scaled
+
+def plot_loss_function_epochs(
+    loss_epochs: list[float],
+    num_samples: int,
+    batch_size: int,
+    learning_rate: float,
+    save_fig_dir: Optional[str] = None,
+):
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        y=loss_epochs,
+        x=list(range(1, len(loss_epochs) + 1)),
+        mode='lines+markers',
+        name='Training Loss'
+    ))
+    fig.update_layout(
+        title=f"Training Loss per Epoch<br><sup>Batch size: {batch_size}, Train samples: {num_samples}, Learning rate: {learning_rate}</sup><br>",
+        xaxis_title="Epoch",
+        yaxis_title="Loss",
+        template="plotly_white",
+    )
+    if save_fig_dir is not None:
+        os.makedirs(save_fig_dir, exist_ok=True)
+        fig.write_html(os.path.join(save_fig_dir, "training_loss.html"))
+    return fig

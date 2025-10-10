@@ -3,26 +3,25 @@ from importlib import resources as impresources
 from importlib import import_module
 import yaml
 from typing import Optional, Tuple
-
+from datetime import datetime
 import neptune
-#from neptune_tensorboard import enable_tensorboard_logging
+
 import pandas as pd
 import torch
 import torchmetrics
-from torch.utils.tensorboard import SummaryWriter
 
 from recurrent_health_events_prediction import configs
 from recurrent_health_events_prediction.datasets.HospReadmDataset import (
     HospReadmDataset,
 )
-from recurrent_health_events_prediction.training.utils import standard_scale_data
-from recurrent_health_events_prediction.utils.general_utils import import_yaml_config
+from recurrent_health_events_prediction.training.utils import plot_loss_function_epochs, standard_scale_data
+from recurrent_health_events_prediction.utils.general_utils import import_yaml_config, save_yaml_config
 from recurrent_health_events_prediction.utils.neptune_utils import (
     add_model_config_to_neptune,
+    add_plotly_plots_to_neptune_run,
     initialize_neptune_run,
     upload_model_to_neptune,
 )
-
 
 def scale_preprocessed_data(
     data_directory: str, training_data_config: dict, save_scaler_dir_path: str = None
@@ -109,7 +108,7 @@ def train(
     model_config: dict,
     ModelClass: Optional[torch.nn.Module] = None,
     neptune_run: Optional[neptune.Run] = None,
-    writer: Optional[SummaryWriter] = None
+    writer = None
 ) -> Tuple[torch.nn.Module, list[float]]:
     """
     Train the model.
@@ -199,7 +198,8 @@ def train(
             f"Epoch {epoch + 1}/{model_config['num_epochs']}, Loss: {avg_epoch_loss}"
         )
         if neptune_run:
-            neptune_run.log_metric("train/loss", avg_epoch_loss)
+            neptune_run["train/loss"].log(avg_epoch_loss)
+
         
         # Log to TensorBoard (new)
         if writer is not None:
@@ -213,6 +213,8 @@ def train(
                     writer.add_histogram(f"grads/{name}", param.grad, epoch + 1)
 
     print("\nTraining complete.")
+    
+    
 
     return model, loss_over_epochs
 
@@ -270,8 +272,10 @@ def evaluate(
     return {"accuracy": accuracy, "f1_score": f1, "auroc": auroc}
 
 
-def make_tb_writer(log_dir: str | None = None) -> SummaryWriter:
+def make_tb_writer(log_dir: str | None = None):
     # e.g., logs go under runs/gru_model_run/<timestamp>
+    from torch.utils.tensorboard import SummaryWriter
+    os.makedirs(log_dir, exist_ok=True)
     return SummaryWriter(log_dir=log_dir)
 
 
@@ -344,10 +348,11 @@ def main(
     log_in_neptune: bool = False,
     neptune_tags: Optional[list[str]] = None,
     neptune_run_name: str = "deep_learning_model_run",
+    tensorboard_run_name: str = "deep_learning_model_run",
 ):
     print("Starting training script...")
     print("Logging in Neptune:", log_in_neptune)
-    
+
     data_config_path = (impresources.files(configs) / "data_config.yaml")
 
     with open(data_config_path) as f:
@@ -363,7 +368,7 @@ def main(
     print(f"Using model config from: {model_config_path}")
     print(f"Model name: {model_name}")
     print(f"Data directory: {data_directory}")
-    
+
     model_params_dict = model_config['model_params']
     assert model_params_dict["input_size_curr"] == len(
         model_config["current_feat_cols"]
@@ -379,11 +384,11 @@ def main(
         if log_in_neptune
         else None
     )
-    
+
     if neptune_run:
         add_model_config_to_neptune(neptune_run, model_config)
         neptune_run["train/data_directory"] = data_directory
-        #enable_tensorboard_logging(neptune_run)
+        neptune_run["tensorboard/run_name"] = tensorboard_run_name
 
     # Prepare datasets (load existing or create + save new)
     train_dataset, test_dataset, _, _ = prepare_train_test_datasets(
@@ -398,11 +403,25 @@ def main(
     print("Initializing TensorBoard writer...")
     # Create TensorBoard writer (log dir name matches your run name)
     base_log_dir = training_data_config.get("tensorboard_log_dir", "_runs")
-    writer = make_tb_writer(log_dir=f"{base_log_dir}/{neptune_run_name}")
+    log_dir = os.path.join(base_log_dir, tensorboard_run_name)
+    writer = make_tb_writer(log_dir=log_dir)
     
+    # Save model_config as YAML in log_dir
+    model_config_yaml_outpath = os.path.join(log_dir, "model_config.yaml")
+    save_yaml_config(model_config, model_config_yaml_outpath)
+    print(f"Saved model config to {model_config_yaml_outpath}")
+
     # Train model
 
-    model, _ = train(train_dataset, model_config, neptune_run=neptune_run, writer=writer)
+    model, loss_epochs = train(train_dataset, model_config, neptune_run=neptune_run, writer=writer)
+
+    fig = plot_loss_function_epochs(
+        loss_epochs,
+        num_samples=len(train_dataset),
+        batch_size=model_config["batch_size"],
+        learning_rate=model_config["learning_rate"],
+        save_fig_dir=log_dir,
+    )
 
     print("Saving trained model...")
     # Save the trained model
@@ -411,22 +430,23 @@ def main(
     )
     torch.save(model.state_dict(), model_save_path)
     print(f"Trained model saved to {model_save_path}")
-    
+
     if neptune_run:
         upload_model_to_neptune(neptune_run, model_save_path)
+        add_plotly_plots_to_neptune_run(neptune_run, fig, "loss_per_epoch", "train")
 
     eval_results = evaluate(test_dataset, model, batch_size=model_config["batch_size"])
-    
+
     # Log eval scalars to TensorBoard
     for k, v in eval_results.items():
         writer.add_scalar(f"eval/{k}", v)
 
     writer.flush()
     writer.close()
-    
+
     if neptune_run:
         for metric_name, metric_value in eval_results.items():
-            neptune_run.log_metric(f"eval/{metric_name}", metric_value)
+            neptune_run[f"eval/{metric_name}"].log(metric_value)
         neptune_run.stop()
 
     print("Training and evaluation complete.")
@@ -439,9 +459,12 @@ if __name__ == "__main__":
     model_config_path = f"/workspaces/msc-thesis-recurrent-health-modeling/_models/mimic/deep_learning/{model_name}/{model_name}_config.yaml"
     overwrite_preprocessed = False
 
-    LOG_IN_NEPTUNE = False
-    neptune_run_name = f"{model_name}_model_run"
+    LOG_IN_NEPTUNE = True
+    neptune_run_name = f"{model_name}_run"
     neptune_tags = ["deep_learning", "all_patients", "mimic"]
+    
+    now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tensorboard_run_name = f"{model_name}_{now_str}"  # for TensorBoard logging
 
     # Check if the provided paths exist
     if not os.path.exists(model_config_path):
@@ -456,4 +479,5 @@ if __name__ == "__main__":
         log_in_neptune=LOG_IN_NEPTUNE,
         neptune_run_name=neptune_run_name,
         neptune_tags=neptune_tags,
+        tensorboard_run_name=tensorboard_run_name,
     )
