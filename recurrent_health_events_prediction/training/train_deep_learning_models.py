@@ -7,21 +7,43 @@ from datetime import datetime
 import neptune
 
 import pandas as pd
+import numpy as np
 import torch
 import torchmetrics
+from sklearn.metrics import roc_auc_score, confusion_matrix, f1_score, recall_score, accuracy_score, precision_score
 
 from recurrent_health_events_prediction import configs
 from recurrent_health_events_prediction.datasets.HospReadmDataset import (
     HospReadmDataset,
 )
-from recurrent_health_events_prediction.training.utils import plot_loss_function_epochs, standard_scale_data
+from recurrent_health_events_prediction.training.utils import find_best_threshold, plot_loss_function_epochs, standard_scale_data
+from recurrent_health_events_prediction.training.utils import plot_confusion_matrix
+from recurrent_health_events_prediction.training.utils_traditional_classifier import save_test_predictions
 from recurrent_health_events_prediction.utils.general_utils import import_yaml_config, save_yaml_config
 from recurrent_health_events_prediction.utils.neptune_utils import (
     add_model_config_to_neptune,
+    add_plot_to_neptune_run,
     add_plotly_plots_to_neptune_run,
     initialize_neptune_run,
+    upload_file_to_neptune,
     upload_model_to_neptune,
 )
+
+def add_evaluation_results_to_neptune(
+    neptune_run: neptune.Run,
+    eval_results: dict,
+    class_names: Optional[list[str]] = None,
+    last_events: bool = False,
+    
+):
+    neptune_path = "evaluation/last_events" if last_events else "evaluation"
+    for metric_name, metric_value in eval_results.items():
+        if metric_name == "confusion_matrix":
+            fig = plot_confusion_matrix(conf_matrix=metric_value, class_names=class_names)
+            add_plot_to_neptune_run(neptune_run, "confusion_matrix", fig, neptune_path)
+        else:
+            neptune_run[f"{neptune_path}/{metric_name}"] = metric_value
+
 
 def scale_preprocessed_data(
     data_directory: str, training_data_config: dict, save_scaler_dir_path: str = None
@@ -101,6 +123,43 @@ def get_train_test_datasets(
     test_dataset = HospReadmDataset(csv_path=test_df_path, **dataset_config)
 
     return train_dataset, test_dataset
+
+def get_test_last_events_only_dataset(test_df_path, model_config, training_data_config):
+    """
+    Get testing dataset with only the last event per patient.
+    Args:
+        test_df_path (str): Path to the testing data CSV file.
+        model_config (dict): Model configuration parameters.
+        training_data_config (dict): Training configuration parameters.
+    Returns:
+        Testing dataset with only the last event per patient.
+    """
+
+    dataset_config = {
+        "longitudinal_feat_cols": model_config["longitudinal_feat_cols"],
+        "current_feat_cols": model_config["current_feat_cols"],
+        "max_seq_len": model_config.get("max_sequence_length", 5),
+        "no_elective": model_config.get("no_elective", True),
+        "reverse_chronological_order": model_config.get(
+            "reverse_chronological_order", True
+        ),
+        "last_events_only": True,  # Only keep last event per patient
+        # column names config
+        "subject_id_col": training_data_config.get("patient_id_col", "SUBJECT_ID"),
+        "order_col": training_data_config.get("time_col", "ADMITTIME"),
+        "label_col": training_data_config.get(
+            "binary_event_col", "READMISSION_30_DAYS"
+        ),
+        "next_admt_type_col": training_data_config.get(
+            "next_admt_type_col", "NEXT_ADMISSION_TYPE"
+        ),
+        "hosp_id_col": training_data_config.get("hosp_id_col", "HADM_ID"),
+    }
+
+    # Create dataset
+    test_dataset = HospReadmDataset(csv_path=test_df_path, **dataset_config)
+
+    return test_dataset
 
 
 def train(
@@ -223,7 +282,6 @@ def evaluate(
     test_dataset: HospReadmDataset,
     model: torch.nn.Module,
     batch_size: 64,
-    prob_threshold: float = 0.5,
 ) -> dict:
     """
     Evaluate the model.
@@ -243,33 +301,43 @@ def evaluate(
     )
 
     # Evaluation metrics
-    accuracy_metric = torchmetrics.Accuracy(task="binary", num_classes=2)
-    f1_metric = torchmetrics.F1Score(task="binary", num_classes=2)
     auroc_metric = torchmetrics.AUROC(task="binary", num_classes=2)
 
-    all_preds = []
-    all_labels = []
+    all_pred_probs = np.array([])
+    all_labels = np.array([])
 
     with torch.no_grad():
         for batch in test_dataloader:
             x_current, x_past, mask_past, labels = batch
             outputs_logits = model(x_current, x_past, mask_past)
             probs = torch.sigmoid(outputs_logits)
-            preds = (probs >= prob_threshold).long().squeeze(-1)
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
+            all_pred_probs = np.concatenate((all_pred_probs, probs.cpu().numpy()))
+            all_labels = np.concatenate((all_labels, labels.cpu().numpy()))
 
-            accuracy_metric.update(preds, labels)
-            f1_metric.update(preds, labels)
-            auroc_metric.update(torch.sigmoid(outputs_logits), labels)
+            auroc_metric.update(probs, labels)
 
-    accuracy = accuracy_metric.compute().item()
-    f1 = f1_metric.compute().item()
     auroc = auroc_metric.compute().item()
 
-    print(f"Evaluation results - Accuracy: {accuracy}, F1 Score: {f1}, AUROC: {auroc}")
+    best_threshold, best_f1 = find_best_threshold(all_labels, all_pred_probs)
 
-    return {"accuracy": accuracy, "f1_score": f1, "auroc": auroc}
+    all_pred_labels = (all_pred_probs >= best_threshold).astype(int)
+
+    conf_matrix = confusion_matrix(all_labels, all_pred_labels)
+    recall = recall_score(all_labels, all_pred_labels)
+    accuracy = accuracy_score(all_labels, all_pred_labels)
+    precision = precision_score(all_labels, all_pred_labels)
+
+    print(f"Evaluation results - AUROC: {auroc}, Best F1-Score: {best_f1}, Best Threshold: {best_threshold}")
+
+    return {
+        "f1_score": best_f1,
+        "auroc": auroc,
+        "best_threshold": best_threshold,
+        "confusion_matrix": conf_matrix,
+        "recall": recall,
+        "accuracy": accuracy,
+        "precision": precision,
+    }, all_pred_labels, all_pred_probs, all_labels
 
 
 def make_tb_writer(log_dir: str | None = None):
@@ -311,15 +379,20 @@ def prepare_train_test_datasets(
 
     pytorch_train_dataset_path = os.path.join(model_config_dir_path, "train_dataset.pt")
     pytorch_test_dataset_path = os.path.join(model_config_dir_path, "test_dataset.pt")
+    pytorch_last_events_test_dataset_path = os.path.join(model_config_dir_path, "last_events_test_dataset.pt")
 
     if (
         os.path.exists(pytorch_train_dataset_path)
         and os.path.exists(pytorch_test_dataset_path)
+        and os.path.exists(pytorch_last_events_test_dataset_path)
         and not overwrite_preprocessed
     ):
         print("Loading existing PyTorch datasets...")
         train_dataset = torch.load(pytorch_train_dataset_path, weights_only=False)
         test_dataset = torch.load(pytorch_test_dataset_path, weights_only=False)
+        last_events_test_dataset = torch.load(pytorch_last_events_test_dataset_path, weights_only=False)
+        print(f"Test dataset (all events) size: {len(test_dataset)}")
+        print(f"Test dataset (last events only) size: {len(last_events_test_dataset)}")
     else:
         print("Creating new PyTorch datasets...")
 
@@ -329,16 +402,25 @@ def prepare_train_test_datasets(
             model_config,
             training_data_config=training_data_config,
         )
+        
+        last_events_test_dataset = get_test_last_events_only_dataset(
+            test_df_path,
+            model_config,
+            training_data_config=training_data_config,
+        )
+        print(f"Test dataset (all events) size: {len(test_dataset)}")
+        print(f"Test dataset (last events only) size: {len(last_events_test_dataset)}")
 
         # Ensure target directory exists
         os.makedirs(model_config_dir_path, exist_ok=True)
 
         torch.save(train_dataset, pytorch_train_dataset_path)
         torch.save(test_dataset, pytorch_test_dataset_path)
+        torch.save(last_events_test_dataset, pytorch_last_events_test_dataset_path)
 
         print(f"Saved PyTorch datasets to {model_config_dir_path}")
 
-    return train_dataset, test_dataset, train_df_path, test_df_path
+    return train_dataset, test_dataset, last_events_test_dataset, train_df_path, test_df_path
 
 
 def main(
@@ -391,7 +473,7 @@ def main(
         neptune_run["tensorboard/run_name"] = tensorboard_run_name
 
     # Prepare datasets (load existing or create + save new)
-    train_dataset, test_dataset, _, _ = prepare_train_test_datasets(
+    train_dataset, test_dataset, last_events_test_dataset, _, _ = prepare_train_test_datasets(
         data_directory=data_directory,
         training_data_config=training_data_config,
         model_config=model_config,
@@ -405,7 +487,7 @@ def main(
     base_log_dir = training_data_config.get("tensorboard_log_dir", "_runs")
     log_dir = os.path.join(base_log_dir, tensorboard_run_name)
     writer = make_tb_writer(log_dir=log_dir)
-    
+
     # Save model_config as YAML in log_dir
     model_config_yaml_outpath = os.path.join(log_dir, "model_config.yaml")
     save_yaml_config(model_config, model_config_yaml_outpath)
@@ -413,7 +495,9 @@ def main(
 
     # Train model
 
-    model, loss_epochs = train(train_dataset, model_config, neptune_run=neptune_run, writer=writer)
+    model, loss_epochs = train(
+        train_dataset, model_config, neptune_run=neptune_run, writer=writer
+    )
 
     fig = plot_loss_function_epochs(
         loss_epochs,
@@ -435,18 +519,64 @@ def main(
         upload_model_to_neptune(neptune_run, model_save_path)
         add_plotly_plots_to_neptune_run(neptune_run, fig, "loss_per_epoch", "train")
 
-    eval_results = evaluate(test_dataset, model, batch_size=model_config["batch_size"])
+    eval_results, _, _, _ = evaluate(test_dataset, model, batch_size=model_config["batch_size"])
+    eval_results_last_events, all_pred_labels, all_pred_probs, all_labels = evaluate(
+        last_events_test_dataset, model, batch_size=model_config["batch_size"]
+    )
+
+    print("Evaluation on all test events:", eval_results)
+    print("Evaluation on last test events only:", eval_results_last_events)
 
     # Log eval scalars to TensorBoard
     for k, v in eval_results.items():
-        writer.add_scalar(f"eval/{k}", v)
+        if k != "confusion_matrix":  # Skip confusion matrix for scalar logging
+            writer.add_scalar(f"eval/{k}", v)
 
     writer.flush()
     writer.close()
 
+    # ===== Save All Predictions Last Events =====
+    pred_test_output_filepath = os.path.join(log_dir, "test_predictions.csv")
+    print("\nSaving test predictions...")
+    print("Output path for test predictions: ", pred_test_output_filepath)
+    save_test_predictions(
+        out_path=pred_test_output_filepath,
+        id_series=[0]*len(all_labels),  # Placeholder if no specific ID is needed
+        y_true=all_labels,
+        proba_dict={model_name: all_pred_probs},
+        pred_dict={model_name: all_pred_labels},
+        file_format="csv"  # Change to "parquet" if needed
+    )
+
     if neptune_run:
-        for metric_name, metric_value in eval_results.items():
-            neptune_run[f"eval/{metric_name}"].log(metric_value)
+        add_evaluation_results_to_neptune(
+            neptune_run,
+            eval_results,
+            class_names=training_data_config.get("class_names", ["No Readmission", "Readmission"]),
+            last_events=False,
+        )
+        add_evaluation_results_to_neptune(
+            neptune_run,
+            eval_results_last_events,
+            class_names=training_data_config.get("class_names", ["No Readmission", "Readmission"]),
+            last_events=True,
+        )
+        upload_file_to_neptune(
+            neptune_run,
+            pred_test_output_filepath,
+            neptune_base_path="artifacts/inference",
+            neptune_filename="test_predictions.csv"
+        )
+        upload_file_to_neptune(
+            neptune_run,
+            model_config_yaml_outpath,
+            neptune_base_path="artifacts/config",
+            neptune_filename="model_config.yaml"
+        )
+        neptune_run["num_parameters"] = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        neptune_run["training_data_stats/train/num_samples"] = len(train_dataset)
+        neptune_run["training_data_stats/test/num_samples"] = len(test_dataset)
+        neptune_run["training_data_stats/test/num_samples_last_events"] = len(last_events_test_dataset)
         neptune_run.stop()
 
     print("Training and evaluation complete.")
@@ -454,7 +584,7 @@ def main(
 
 if __name__ == "__main__":
     print("Imports complete. Running main...")
-    model_name = "gru"
+    model_name = "gru_duration_aware"
     save_scaler_dir_path = f"/workspaces/msc-thesis-recurrent-health-modeling/_models/mimic/deep_learning/scalers"
     model_config_path = f"/workspaces/msc-thesis-recurrent-health-modeling/_models/mimic/deep_learning/{model_name}/{model_name}_config.yaml"
     overwrite_preprocessed = False

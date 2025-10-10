@@ -18,7 +18,7 @@ from recurrent_health_events_prediction.preprocessing.gen_dataset_hmm import (
     load_data_for_inference_relapse,
 )
 from recurrent_health_events_prediction.training.train_traditional_classifier import (
-    train_traditional_classifier,
+    train_test_pipeline,
 )
 
 
@@ -236,7 +236,7 @@ def main(
         prob_output_dir = os.path.dirname(model_config_path)
         prob_output_filepath = os.path.join(prob_output_dir, "prob_predictions.csv")
 
-        train_traditional_classifier(
+        train_test_pipeline(
             last_events_with_hmm_feat_df,
             base_features_cols=base_features_cols,
             target_col = target_col,
