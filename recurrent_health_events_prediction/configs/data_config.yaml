@@ -70,7 +70,7 @@ training_data:
     preprocessed_path: "/workspaces/msc-thesis-recurrent-health-modeling/data/synthetic_hmm"
   mimic:
     preprocessed_output_path_1st_round: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes"
-    data_directory: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes"
+    data_directory: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes/train_test"
     tensorboard_log_dir: "/workspaces/msc-thesis-recurrent-health-modeling/_runs"
     features_to_scale:
       - "AGE"
@@ -100,6 +100,9 @@ training_data:
     next_admt_type_col: "NEXT_ADMISSION_TYPE"
     hosp_id_col: "HADM_ID"
     no_elective: true
+    class_names:
+      - "No Readmission"
+      - "Readmission"
     admission_types_to_consider: Null
     censoring_limit: 120 # in days
     consider_death_after_discharge_gt: 365 # in days
