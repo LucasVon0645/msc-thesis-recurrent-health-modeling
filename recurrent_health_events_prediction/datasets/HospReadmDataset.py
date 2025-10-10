@@ -36,6 +36,7 @@ class HospReadmDataset(Dataset):
         next_admt_type_col: str = "NEXT_ADMISSION_TYPE",
         hosp_id_col: str = "HADM_ID",
         reverse_chronological_order: bool = True,
+        last_events_only: bool = False,  # if True, keep only the last event per subject
     ):
         super().__init__()
         self.csv_path = csv_path
@@ -51,6 +52,7 @@ class HospReadmDataset(Dataset):
         self.hosp_id_col = hosp_id_col
         self.next_admt_type_col = next_admt_type_col
         self.reverse_chronological_order = reverse_chronological_order
+        self.last_events_only = last_events_only
 
         self.samples = self._build_sequences()
 
@@ -87,8 +89,15 @@ class HospReadmDataset(Dataset):
             admit_types = g[self.next_admt_type_col] if self.next_admt_type_col in g.columns else None
 
             n = len(g)
+  
             # Iterate t=1..n, where t indexes the *current* visit within the subject
-            for t in range(1, n + 1):
+            # If last_events_only is True, only process the last visit (t=n)
+            if self.last_events_only:
+                t_range = [n]  # Only the last visit
+            else:
+                t_range = range(1, n + 1)  # All visits
+            
+            for t in t_range:
                 # label at current visit
                 y_t = g_lab.iloc[t - 1]
                 if pd.isna(y_t):
