@@ -225,6 +225,7 @@ def plot_auc(y_pred, y_true, title: str = "AUC ROC Curve", save_path: Optional[s
         fig.write_html(save_path)
     if show_plot:
         fig.show()
+    return fig
 
 def get_feature_importance_df(model):
     """

@@ -11,7 +11,9 @@ from pathlib import Path
 from sklearn.model_selection import StratifiedShuffleSplit, ShuffleSplit
 from sklearn.preprocessing import StandardScaler
 from plotly import graph_objects as go
-
+from sklearn.metrics import ConfusionMatrixDisplay
+from scipy.optimize import minimize_scalar
+from sklearn.metrics import f1_score
 
 def summarize_search_results(search_cv, print_results: bool = True, model_name: str = "Model"):
     """
@@ -490,3 +492,27 @@ def plot_loss_function_epochs(
         os.makedirs(save_fig_dir, exist_ok=True)
         fig.write_html(os.path.join(save_fig_dir, "training_loss.html"))
     return fig
+
+def plot_confusion_matrix(
+    conf_matrix: np.ndarray,
+    class_names: list[str],
+):
+    import matplotlib.pyplot as plt
+
+    disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix, display_labels=class_names)
+    fig, ax = plt.subplots()
+    disp.plot(ax=ax, cmap="Blues", colorbar=True)
+    ax.set_title("Confusion Matrix")
+    plt.tight_layout()
+    plt.close(fig)
+    return fig
+
+def f1_objective(threshold, y_true, y_pred_proba):
+    y_pred = (y_pred_proba >= threshold).astype(int)
+    return -f1_score(y_true, y_pred)
+
+def find_best_threshold(y_true, y_pred_proba):
+    result = minimize_scalar(f1_objective, bounds=(0, 1), method='bounded', args=(y_true, y_pred_proba))
+    best_threshold = result.x
+    best_f1 = -result.fun
+    return best_threshold, best_f1  # Return threshold and best F1 score

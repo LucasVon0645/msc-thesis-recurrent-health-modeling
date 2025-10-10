@@ -161,8 +161,8 @@ def add_model_config_to_neptune(neptune_run: neptune.Run, model_config: dict):
     for key, value in model_config.items():
         if isinstance(value, list):
             try:
-                # Convert list elements to strings, then join with newline
-                neptune_run[f"model_config/{key}"] = '\n'.join(map(str, value))
+                # Convert list to "[item1, item2, ...]" string format
+                neptune_run[f"model_config/{key}"] = "[" + ", ".join(map(str, value)) + "]"
             except Exception as e:
                 print(f"Could not log list for key {key}: {e}")
         else:

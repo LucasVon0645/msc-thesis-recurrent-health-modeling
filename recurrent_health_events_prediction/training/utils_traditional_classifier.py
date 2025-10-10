@@ -5,6 +5,8 @@ import numpy as np
 from sklearn.impute import SimpleImputer
 import warnings
 from pathlib import Path
+import joblib
+
 
 warnings.filterwarnings("ignore")
 
@@ -13,11 +15,13 @@ from sklearn.linear_model import LogisticRegression
 
 from recurrent_health_events_prediction.model.utils import plot_model_feature_importance
 from recurrent_health_events_prediction.training.utils import (
+    plot_confusion_matrix,
     plot_permutation_importance,
     plot_model_shap_feature_importance,
 )
 from recurrent_health_events_prediction.utils.neptune_utils import (
     add_plot_to_neptune_run,
+    add_plotly_plots_to_neptune_run,
 )
 
 
@@ -26,7 +30,7 @@ def add_training_data_stats_to_neptune(
     training_df: pd.DataFrame,
     target_col: str,
     feature_cols: list[str],
-    neptune_path="traditional_classifier/training_data",
+    neptune_path="training_data_stats",
 ):
     X = training_df[feature_cols]
     y = training_df[target_col].astype(int)
@@ -38,12 +42,17 @@ def add_training_data_stats_to_neptune(
     neptune_run[f"{neptune_path}/feature_names"] = X.columns.tolist()
 
 
-def scale_features(X_train, X_test, features_not_to_scale: Optional[list[str]] = None):
+def scale_features(
+    X_train,
+    X_test,
+    features_to_scale: Optional[list[str]] = None,
+    save_scaler_dir: Optional[str] = None,
+):
     scaler = StandardScaler()
-    if features_not_to_scale is not None:
+    if features_to_scale is not None:
         # Identify features to scale
         features_to_scale = [
-            col for col in X_train.columns if col not in features_not_to_scale
+            col for col in X_train.columns if col in features_to_scale
         ]
     else:
         features_to_scale = X_train.columns.tolist()
@@ -52,6 +61,11 @@ def scale_features(X_train, X_test, features_not_to_scale: Optional[list[str]] =
     X_test_scaled = X_test.copy()
     X_train_scaled[features_to_scale] = scaler.fit_transform(X_train[features_to_scale])
     X_test_scaled[features_to_scale] = scaler.transform(X_test[features_to_scale])
+    if save_scaler_dir is not None:
+        Path(save_scaler_dir).mkdir(parents=True, exist_ok=True)
+        scaler_filepath = Path(save_scaler_dir) / "scaler.joblib"
+        print(f"Saving scaler to {scaler_filepath}")
+        joblib.dump(scaler, scaler_filepath)
     return X_train_scaled, X_test_scaled
 
 
@@ -61,7 +75,7 @@ def plot_all_feature_importances(
     y,
     model_name: str,
     neptune_run: Optional[neptune.Run] = None,
-    neptune_path="traditional_classifier/feat_importances",
+    neptune_path="feat_importances",
     random_state=42,
     plot_shap=True,
     show_plots=False,
@@ -111,17 +125,28 @@ def plot_all_feature_importances(
 
 def add_cv_and_evaluation_results_to_neptune(
     neptune_run: neptune.Run,
-    model_name,
-    cv_results,
-    roc_auc_score,
-    neptune_path="traditional_classifier",
+    model_name: str,
+    best_threshold: float,
+    cv_results: dict,
+    eval_results: dict,
+    conf_matrix: np.ndarray,
+    class_names: list[str],
+    neptune_path="results",
+    auc_plotly_fig = None,
 ):
-    neptune_run[f"{neptune_path}/{model_name.lower().replace(' ', '_')}/cv_results"] = (
+    neptune_run[f"{neptune_path}/{model_name.lower().replace(' ', '_')}/cross-validation"] = (
         cv_results
     )
+    neptune_run[f"{neptune_path}/{model_name.lower().replace(' ', '_')}/best_threshold"] = best_threshold
     neptune_run[
-        f"{neptune_path}/{model_name.lower().replace(' ', '_')}/eval_roc_auc_score"
-    ] = roc_auc_score
+        f"{neptune_path}/{model_name.lower().replace(' ', '_')}/evaluation"
+    ] = eval_results
+    
+    fig = plot_confusion_matrix(conf_matrix=conf_matrix, class_names=class_names)
+    plot_path = f"results/{model_name.lower().replace(' ', '_')}/evaluation"
+    add_plot_to_neptune_run(neptune_run, "confusion_matrix", fig, plot_path)
+    if auc_plotly_fig is not None:
+        add_plotly_plots_to_neptune_run(neptune_run, auc_plotly_fig, "auc_roc.html", plot_path)
 
 
 def impute_missing_features(
@@ -158,11 +183,12 @@ def impute_missing_features(
 
     return X_train, X_test
 
-def save_prob_predictions(
+def save_test_predictions(
     out_path: str | Path,
     id_series: pd.Series | np.ndarray,             # test IDs aligned to predictions
     y_true: pd.Series | np.ndarray,   # true labels (test)
     proba_dict: Dict[str, np.ndarray],# e.g. {"logreg": y_pred_proba_logreg, "rf": y_pred_proba_rf, "lgbm": y_pred_proba_lgbm}
+    pred_dict: Dict[str, np.ndarray], # e.g. {"logreg": y_pred_logreg, "rf": y_pred_rf, "lgbm": y_pred_lgbm}
     file_format: str = "csv"      # "parquet" or "csv"
 ) -> pd.DataFrame:
     """
@@ -179,6 +205,13 @@ def save_prob_predictions(
         if len(v) != len(df):
             raise ValueError(f"Length mismatch for '{k}': {len(v)} vs {len(df)}")
         df[f"y_pred_proba_{k}"] = v
+
+    # attach each pred column
+    for k, v in pred_dict.items():
+        v = np.asarray(v).reshape(-1)
+        if len(v) != len(df):
+            raise ValueError(f"Length mismatch for '{k}': {len(v)} vs {len(df)}")
+        df[f"y_pred_{k}"] = v
 
     out_path = Path(out_path)
 
