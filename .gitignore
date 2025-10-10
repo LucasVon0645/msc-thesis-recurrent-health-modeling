@@ -4,6 +4,7 @@ data
 .neptune-token
 .DS_Store
 .neptune
+_runs
 __pycache__
 _models
 *.pyc
