@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.calibration import calibration_curve
 from sklearn.inspection import permutation_importance
 import shap
 from typing import Optional, Sequence, Tuple
@@ -488,6 +489,8 @@ def plot_loss_function_epochs(
         xaxis_title="Epoch",
         yaxis_title="Loss",
         template="plotly_white",
+        width=800,
+        height=400
     )
     if save_fig_dir is not None:
         os.makedirs(save_fig_dir, exist_ok=True)
@@ -517,6 +520,56 @@ def find_best_threshold(y_true, y_pred_proba):
     best_threshold = result.x
     best_f1 = -result.fun
     return best_threshold, best_f1  # Return threshold and best F1 score
+
+def plot_calibration_curve(labels, pred_prob, n_bins=5, title = "Calibration Curve", save_path: Optional[str] = None, show_plot=True):
+    """
+    Plots a calibration curve using Plotly.
+
+    Args:
+        labels (array-like): True binary labels (0 or 1).
+        pred_prob (array-like): Predicted probabilities for the positive class.
+        n_bins (int): Number of bins to use for calibration curve.
+    """
+    fraction_of_positives, mean_predicted_value = calibration_curve(labels, pred_prob, n_bins=n_bins)
+
+    # Create the plot
+    fig = go.Figure()
+
+    # Add calibration curve
+    fig.add_trace(go.Scatter(
+        x=mean_predicted_value,
+        y=fraction_of_positives,
+        mode='lines+markers',
+        name='Calibration Curve'
+    ))
+
+    # Add perfectly calibrated line
+    fig.add_trace(go.Scatter(
+        x=[0, 1],
+        y=[0, 1],
+        mode='lines',
+        name='Perfectly Calibrated',
+        line=dict(dash='dash')
+    ))
+
+    # Update layout
+    fig.update_layout(
+        title=title,
+        xaxis_title="Mean Predicted Probability",
+        yaxis_title="Fraction of Positives",
+        legend_title="Legend",
+        template="plotly_white",
+        width=800,
+        height=400
+    )
+    if save_path:
+        if not save_path.endswith('.html'):
+            save_path += '.html'
+        # Save the figure as an HTML file
+        fig.write_html(save_path)
+    if show_plot:
+        fig.show()
+    return fig
 
 def plot_pred_proba_distribution(
     y_true: np.ndarray,
@@ -554,7 +607,9 @@ def plot_pred_proba_distribution(
         nbins=50,
         barmode="overlay",
         labels={"pred_proba": "Predicted Probability", "y_true": "True Label"},
-        title="Histogram of Predicted Probabilities by True Labels"
+        title="Histogram of Predicted Probabilities by True Labels",
+        width=800,
+        height=400
     )
     fig.update_layout(template="plotly_white")
 

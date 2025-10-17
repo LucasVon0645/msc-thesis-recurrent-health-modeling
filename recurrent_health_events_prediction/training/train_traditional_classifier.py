@@ -22,9 +22,12 @@ from lightgbm import LGBMClassifier
 
 from recurrent_health_events_prediction.training.utils import (
     find_best_threshold,
+    plot_calibration_curve,
+    plot_pred_proba_distribution,
     summarize_search_results
 )
 from recurrent_health_events_prediction.utils.neptune_utils import (
+    add_plotly_plots_to_neptune_run,
     initialize_neptune_run,
     track_file_in_neptune,
     upload_file_to_neptune,
@@ -33,6 +36,7 @@ from recurrent_health_events_prediction.utils.neptune_utils import (
 from recurrent_health_events_prediction.training.utils_traditional_classifier import (
     add_cv_and_evaluation_results_to_neptune,
     add_training_data_stats_to_neptune,
+    extract_results,
     impute_missing_features,
     plot_all_feature_importances,
     save_test_predictions,
@@ -117,7 +121,34 @@ def train_test_classifier(
             plot_shap=plot_shap,
             show_plots=show_plots
         )
-    
+    class_names_dict = {i: class_names[i] for i in range(len(class_names))} if class_names else None
+    fig_hist = plot_pred_proba_distribution(y_test, y_pred_proba, show_plot=False, class_names=class_names_dict)
+    fig_hist = fig_hist.update_layout(title=f"Predicted Probabilities by True Labels - {model_name}")
+    fig_auc = plot_auc(y_pred_proba, y_test, show_plot=False, title=f"ROC Curve - {model_name}")
+    fig_cal = plot_calibration_curve(y_test, y_pred_proba, show_plot=False, title=f"Calibration Curve - {model_name}")
+
+    if neptune_run:
+        # Upload plots to Neptune
+        neptune_path = f"results/{model_name.lower().replace(' ', '_')}/evaluation"
+        add_plotly_plots_to_neptune_run(
+            neptune_run,
+            fig_hist,
+            filename="pred_proba_distribution.html",
+            filepath=neptune_path
+        )
+        add_plotly_plots_to_neptune_run(
+            neptune_run,
+            fig_auc,
+            filename="roc_curve.html",
+            filepath=neptune_path
+        )
+        add_plotly_plots_to_neptune_run(
+            neptune_run,
+            fig_cal,
+            filename="calibration_curve.html",
+            filepath=neptune_path
+        )
+
     eval_results = {
         "roc_auc": roc_auc,
         "f1_score": f1,
@@ -211,6 +242,8 @@ def train_test_pipeline(
 
     if missing_features:
         X_train, X_test = impute_missing_features(X_train, X_test, missing_features)
+    
+    features_to_scale = features_to_scale + ["RANDOM_FEATURE"] if features_to_scale is not None else None
 
     X_train_scaled, X_test_scaled = scale_features(
         X_train, X_test, features_to_scale=features_to_scale
@@ -237,7 +270,7 @@ def train_test_pipeline(
         param_distributions["C"] = np.logspace(-4, 4, 100)  # 100 values between 1e-4 and 1e4
         rand_search_config = model_config["logistic_regression"]["rand_search_config"]
 
-        y_pred_proba_logreg, y_pred_logreg, _, _ = train_test_classifier(
+        y_pred_proba_logreg, y_pred_logreg, eval_results_logreg, cv_search_results_logreg = train_test_classifier(
             logreg_model,
             "Logistic Regression",
             X_train_scaled,
@@ -263,7 +296,7 @@ def train_test_pipeline(
         param_distributions = model_config["random_forest"]["param_distributions"]
         rand_search_config = model_config["random_forest"]["rand_search_config"]
 
-        y_pred_proba_rf, y_pred_rf, _, _ = train_test_classifier(
+        y_pred_proba_rf, y_pred_rf, eval_results_rf, cv_search_results_rf = train_test_classifier(
             rf_model,
             "Random Forest",
             X_train,
@@ -292,7 +325,7 @@ def train_test_pipeline(
         param_distributions = model_config["lgbm"]["param_distributions"]
         rand_search_config = model_config["lgbm"]["rand_search_config"]
 
-        y_pred_proba_lgbm, y_pred_lgbm, _, _ = train_test_classifier(
+        y_pred_proba_lgbm, y_pred_lgbm, eval_results_lgbm, cv_search_results_lgbm = train_test_classifier(
             lgbm,
             "LightGBM",
             X_train,
@@ -330,7 +363,25 @@ def train_test_pipeline(
             neptune_base_path="artifacts/inference",
             neptune_filename="test_predictions.csv"
         )
+    
+    # ===== Summarize Results =====
+    results_df = pd.DataFrame()
+    if "logistic_regression" in models_to_train:
+        dict_logreg_metrics = extract_results(eval_results_logreg, cv_search_results_logreg)
+        results_df = pd.concat([results_df, pd.DataFrame([dict_logreg_metrics])], ignore_index=True)
 
+    if "random_forest" in models_to_train:
+        dict_rf_metrics = extract_results(eval_results_rf, cv_search_results_rf)
+        results_df = pd.concat([results_df, pd.DataFrame([dict_rf_metrics])], ignore_index=True)
+
+    if "lgbm" in models_to_train:
+        dict_lgbm_metrics = extract_results(eval_results_lgbm, cv_search_results_lgbm)
+        results_df = pd.concat([results_df, pd.DataFrame([dict_lgbm_metrics])], ignore_index=True)
+
+    results_output_filepath = os.path.join(output_dir, "performance_results.csv")
+    print("\nSaving performance results...")
+    print("Output path for performance results: ", results_output_filepath)
+    results_df.to_csv(results_output_filepath, index=False)
 
 def main(
     models_to_train: list[str],
@@ -357,19 +408,23 @@ def main(
     target_col = training_data_config["binary_event_col"]  # Variable to predict
     event_id_col = training_data_config["hosp_id_col"]
     class_names= training_data_config.get("class_names", None)
-    features_to_scale = data_config.get('features_to_scale', None)
+    features_to_scale = training_data_config.get('features_to_scale', None)
     missing_features = model_config.get('missing_features', None)
     next_admt_type_col = training_data_config.get("next_admt_type_col", None)
     
     train_data_filepath = os.path.join(train_test_data_dir, "train_events.csv")
     test_data_filepath = os.path.join(train_test_data_dir, "test_events.csv")
+    
+    print("Dataset: ", dataset)
+    print("Loading training data from: ", train_data_filepath)
+    print("Loading test data from: ", test_data_filepath)
+    
     train_df = pd.read_csv(train_data_filepath)
     train_df = train_df[(train_df["IS_LAST_EVENT"] == 1) & (train_df[next_admt_type_col] != "ELECTIVE")]
     test_df = pd.read_csv(test_data_filepath)
     test_df = test_df[(test_df["IS_LAST_EVENT"] == 1) & (test_df[next_admt_type_col] != "ELECTIVE")]
 
-
-    output_dir = os.path.dirname(model_config_path)
+    print("Output directory: ", output_dir)
 
     tags = (
         ["baseline", "traditional_classifiers"]
@@ -435,6 +490,7 @@ if __name__ == "__main__":
         dataset,
         "last_events",
         "traditional_classifiers",
+        "test_run"
     ]
     random_state = 42  # Set random state for reproducibility
     log_in_neptune = True  # Set to True to log the run in Neptune

@@ -55,6 +55,7 @@ def scale_features(
             col for col in X_train.columns if col in features_to_scale
         ]
     else:
+        print("No specific features to scale provided; scaling all features.")
         features_to_scale = X_train.columns.tolist()
     print(f"Scaling features: {features_to_scale}")
     X_train_scaled = X_train.copy()
@@ -224,3 +225,16 @@ def save_test_predictions(
         df.to_parquet(out_path, index=False)
 
     return df
+
+def extract_results(eval_results, cv_search_results):
+    metrics = {
+        "model_name": cv_search_results["model_name"],
+        "mean_auc_val": cv_search_results["best_score_mean"],
+        "std_auc_val": cv_search_results["best_score_std"],
+        "auc_eval": eval_results.get("roc_auc", np.nan),
+        "accuracy_eval": eval_results.get("accuracy", np.nan),
+        "precision_eval": eval_results.get("precision", np.nan),
+        "recall_eval": eval_results.get("recall", np.nan),
+        "f1_eval": eval_results.get("f1_score", np.nan),
+    }
+    return metrics

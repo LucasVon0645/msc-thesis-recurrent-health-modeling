@@ -354,6 +354,8 @@ def plot_calibration_curve(labels, pred_prob, n_bins=5, title = "Calibration Cur
         fig.write_html(save_path)
     if show_plot:
         fig.show()
+    
+    return fig
 
 def plot_probability_distribution(prob_df, prob_col,
                                            event_col,

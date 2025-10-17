@@ -10,14 +10,16 @@ import pandas as pd
 import numpy as np
 import torch
 import torchmetrics
-from sklearn.metrics import roc_auc_score, confusion_matrix, f1_score, recall_score, accuracy_score, precision_score
+from sklearn.metrics import confusion_matrix, recall_score, accuracy_score, precision_score
 
 from recurrent_health_events_prediction import configs
 from recurrent_health_events_prediction.datasets.HospReadmDataset import (
     HospReadmDataset,
 )
+from recurrent_health_events_prediction.model.utils import plot_auc
 from recurrent_health_events_prediction.training.utils import find_best_threshold, plot_loss_function_epochs, plot_pred_proba_distribution, standard_scale_data
 from recurrent_health_events_prediction.training.utils import plot_confusion_matrix
+from recurrent_health_events_prediction.training.utils_survival import plot_calibration_curve
 from recurrent_health_events_prediction.training.utils_traditional_classifier import save_test_predictions
 from recurrent_health_events_prediction.utils.general_utils import import_yaml_config, save_yaml_config
 from recurrent_health_events_prediction.utils.neptune_utils import (
@@ -260,7 +262,7 @@ def train(
             neptune_run["train/loss"].log(avg_epoch_loss)
 
         
-        # Log to TensorBoard (new)
+        # Log to TensorBoard
         if writer is not None:
             writer.add_scalar("train/loss", avg_epoch_loss, epoch + 1)
 
@@ -326,9 +328,7 @@ def evaluate(
     recall = recall_score(all_labels, all_pred_labels)
     accuracy = accuracy_score(all_labels, all_pred_labels)
     precision = precision_score(all_labels, all_pred_labels)
-
-    print(f"Evaluation results - AUROC: {auroc}, Best F1-Score: {best_f1}, Best Threshold: {best_threshold}")
-
+    
     return {
         "f1_score": best_f1,
         "auroc": auroc,
@@ -354,7 +354,7 @@ def prepare_train_test_datasets(
     save_output_dir_path: str,
     save_scaler_dir_path: str | None = None,
     overwrite_preprocessed: bool = False,
-) -> tuple:
+) -> tuple[HospReadmDataset, HospReadmDataset, HospReadmDataset, str, str]:
     """
     Load or create preprocessed train/test CSVs and corresponding PyTorch datasets.
 
@@ -423,6 +423,80 @@ def prepare_train_test_datasets(
     return train_dataset, test_dataset, last_events_test_dataset, train_df_path, test_df_path
 
 
+def plot_evaluation_figures(
+    all_labels,
+    all_pred_probs,
+    model_name,
+    log_dir,
+    class_names_dict=None,
+    neptune_run=None,
+):
+    """
+    Generate evaluation plots (predicted probability distribution, ROC, and calibration curve)
+    and optionally log them to Neptune.
+
+    Parameters
+    ----------
+    all_labels : array-like
+        True labels of the dataset.
+    neptune_run=None,
+    """
+    # --- Plot evaluation figures ---
+    fig_hist = plot_pred_proba_distribution(
+        all_labels, all_pred_probs, show_plot=False, class_names=class_names_dict
+    )
+    fig_hist = fig_hist.update_layout(
+        title=f"Predicted Probabilities by True Labels - {model_name}"
+    )
+    fig_hist.write_html(os.path.join(log_dir, "pred_proba_distribution.html"))
+
+    fig_auc = plot_auc(
+        all_pred_probs,
+        all_labels,
+        show_plot=False,
+        title=f"ROC Curve - {model_name}",
+        save_path=os.path.join(log_dir, "roc_curve.html"),
+    )
+
+    fig_cal = plot_calibration_curve(
+        all_labels,
+        all_pred_probs,
+        show_plot=False,
+        title=f"Calibration Curve - {model_name}",
+        save_path=os.path.join(log_dir, "calibration_curve.html"),
+    )
+
+    # --- Log to Neptune (if applicable) ---
+    if neptune_run:
+        neptune_path = "evaluation/last_events"
+
+        add_plotly_plots_to_neptune_run(
+            neptune_run,
+            fig_hist,
+            filename="pred_proba_distribution.html",
+            filepath=neptune_path,
+        )
+        add_plotly_plots_to_neptune_run(
+            neptune_run,
+            fig_auc,
+            filename="roc_curve.html",
+            filepath=neptune_path,
+        )
+        add_plotly_plots_to_neptune_run(
+            neptune_run,
+            fig_cal,
+            filename="calibration_curve.html",
+            filepath=neptune_path,
+        )
+
+    return {
+        "hist": fig_hist,
+        "roc": fig_auc,
+        "calibration": fig_cal,
+    }
+
+
+
 def main(
     model_config_path: str,
     save_scaler_dir_path: str,
@@ -446,7 +520,8 @@ def main(
 
     model_config = import_yaml_config(model_config_path)
     model_config_dir_path = os.path.dirname(model_config_path)
-    model_name = os.path.basename(model_config_dir_path)
+    model_name = model_config.get("model_name", "unknown_model")
+    model_dir_name = os.path.basename(model_config_dir_path)
 
     print(f"Using model config from: {model_config_path}")
     print(f"Model name: {model_name}")
@@ -514,33 +589,44 @@ def main(
     print("Saving trained model...")
     # Save the trained model
     model_save_path = os.path.join(
-        model_config_dir_path, f"{model_name}_model.pth"
+        log_dir, f"{model_dir_name}_model.pth"
     )
     torch.save(model.state_dict(), model_save_path)
     print(f"Trained model saved to {model_save_path}")
+    
+    # Model train metrics
+    train_metrics, _, _, _ = evaluate(
+        train_dataset, model, batch_size=model_config["batch_size"]
+    )
+    print("Training metrics: ", train_metrics)
 
     if neptune_run:
         upload_model_to_neptune(neptune_run, model_save_path)
         add_plotly_plots_to_neptune_run(neptune_run, fig, "loss_per_epoch", "train")
-
+        for metric_name, metric_value in train_metrics.items():
+            if metric_name != "confusion_matrix":
+                neptune_run[f"train/{metric_name}"] = metric_value
+    
+    # Evaluate model
     eval_results, _, _, _ = evaluate(test_dataset, model, batch_size=model_config["batch_size"])
     eval_results_last_events, all_pred_labels, all_pred_probs, all_labels = evaluate(
         last_events_test_dataset, model, batch_size=model_config["batch_size"]
     )
-    
+
     class_names=training_data_config.get(
             "class_names", ["No Readmission", "Readmission"]
     )
 
-    fig = plot_pred_proba_distribution(
-        all_pred_labels,
+    class_names_dict = {i: class_names[i] for i in range(len(class_names))} if class_names else None
+
+    _ = plot_evaluation_figures(
+        all_labels,
         all_pred_probs,
-        show_plot=False,
-        save_dir_path=log_dir,
-        class_names=class_names
+        model_name,
+        log_dir,
+        class_names_dict=class_names_dict,
+        neptune_run=neptune_run,
     )
-    if neptune_run:
-        add_plot_to_neptune_run(neptune_run, "pred_proba_distribution", fig, neptune_path="evaluation/last_events")
 
     print("Evaluation on all test events:", eval_results)
     print("Evaluation on last test events only:", eval_results_last_events)
@@ -559,10 +645,10 @@ def main(
     print("Output path for test predictions: ", pred_test_output_filepath)
     save_test_predictions(
         out_path=pred_test_output_filepath,
-        id_series=[0]*len(all_labels),  # Placeholder if no specific ID is needed
+        id_series=last_events_test_dataset.sample_ids,
         y_true=all_labels,
-        proba_dict={model_name: all_pred_probs},
-        pred_dict={model_name: all_pred_labels},
+        proba_dict={model_dir_name: all_pred_probs},
+        pred_dict={model_dir_name: all_pred_labels},
         file_format="csv"  # Change to "parquet" if needed
     )
 
@@ -602,21 +688,21 @@ def main(
 
 if __name__ == "__main__":
     print("Imports complete. Running main...")
-    model_name = "gru_duration_aware_min"
+    model_dir_name = "gru_duration_aware_min"
     multiple_hosp_patients = True  # True if patients can have multiple hospital admissions
     save_scaler_dir_path = f"/workspaces/msc-thesis-recurrent-health-modeling/_models/mimic/deep_learning/scalers"
     if multiple_hosp_patients:
         save_scaler_dir_path += "/multiple_hosp_patients"
-    model_config_path = f"/workspaces/msc-thesis-recurrent-health-modeling/_models/mimic/deep_learning/{model_name}/{model_name}_config.yaml"
-    overwrite_preprocessed = True
+    model_config_path = f"/workspaces/msc-thesis-recurrent-health-modeling/_models/mimic/deep_learning/{model_dir_name}/{model_dir_name}_config.yaml"
+    overwrite_preprocessed = False
 
-    LOG_IN_NEPTUNE = False  # Set to True to log in Neptune
-    neptune_run_name = f"{model_name}_run"
+    LOG_IN_NEPTUNE = True  # Set to True to log in Neptune
+    neptune_run_name = f"{model_dir_name}_run"
     # neptune_tags = ["deep_learning", "all_patients", "mimic"]
     neptune_tags = ["deep_learning", "multiple_hosp_patients", "mimic"]
     
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    tensorboard_run_name = f"{model_name}_{now_str}"  # for TensorBoard logging
+    tensorboard_run_name = f"{model_dir_name}_{now_str}"  # for TensorBoard logging
 
     # Check if the provided paths exist
     if not os.path.exists(model_config_path):
