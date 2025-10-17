@@ -70,13 +70,14 @@ training_data:
     preprocessed_path: "/workspaces/msc-thesis-recurrent-health-modeling/data/synthetic_hmm"
   mimic:
     preprocessed_output_path_1st_round: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes"
-    data_directory: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes/train_test"
+    data_directory: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes/multiple_hosp_patients/train_test"
     tensorboard_log_dir: "/workspaces/msc-thesis-recurrent-health-modeling/_runs"
     features_to_scale:
       - "AGE"
       - "LOG_HOSPITALIZATION_DAYS"
       - "LOG_DAYS_IN_ICU"
       - "LOG_DAYS_UNTIL_NEXT_HOSPITALIZATION"
+      - "LOG_PARTICIPATION_DAYS"
       - "LOG_NUM_DRUGS"
       - "NUM_PROCEDURES"
       - "CHARLSON_INDEX"

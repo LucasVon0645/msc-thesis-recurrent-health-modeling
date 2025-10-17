@@ -30,8 +30,6 @@ dependencies = [
     "torchmetrics (>=1.8.2,<2.0.0)",
     "tensorboard (>=2.20.0,<3.0.0)",
     "neptune-tensorboard (>=1.0.3,<2.0.0)",
-    "torchviz (>=0.0.3,<0.0.4)",
-    "graphviz (>=0.21,<0.22)",
 ]
 
 
