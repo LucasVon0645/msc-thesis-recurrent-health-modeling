@@ -54,6 +54,7 @@ class HospReadmDataset(Dataset):
         self.reverse_chronological_order = reverse_chronological_order
         self.last_events_only = last_events_only
 
+        self.sample_ids = []  # to be filled with HADM_IDs of samples
         self.samples = self._build_sequences()
 
     def _load_dataframe(self) -> pd.DataFrame:
@@ -80,12 +81,15 @@ class HospReadmDataset(Dataset):
 
         # sort by time so rows are oldest→newest inside each subject
         df_sorted = df.sort_values([self.subject_id_col, self.order_col]).reset_index(drop=True)
+        
+        current_hosp_ids = []
 
         samples: list[dict] = []
         for subject_id, g in df_sorted.groupby(self.subject_id_col):
             g_long = g[self.longitudinal_feat_cols]
             g_curr = g[self.current_feat_cols]
             g_lab  = g[self.label_col]
+            g_id = g[self.hosp_id_col]
             admit_types = g[self.next_admt_type_col] if self.next_admt_type_col in g.columns else None
 
             n = len(g)
@@ -100,10 +104,13 @@ class HospReadmDataset(Dataset):
             for t in t_range:
                 # label at current visit
                 y_t = g_lab.iloc[t - 1]
+                hosp_id_t = g_id.iloc[t - 1]
                 if pd.isna(y_t):
                     continue
                 if self.no_elective and admit_types is not None and admit_types.iloc[t - 1] == "ELECTIVE":
                     continue
+
+                current_hosp_ids.append(hosp_id_t)
 
                 # -----------------------
                 # Build PAST sequence (strictly before current t)
@@ -146,6 +153,8 @@ class HospReadmDataset(Dataset):
                     }
                 )
 
+        self.sample_ids = current_hosp_ids
+        
         return samples
 
     def __len__(self):
