@@ -11,6 +11,7 @@ from pathlib import Path
 from sklearn.model_selection import StratifiedShuffleSplit, ShuffleSplit
 from sklearn.preprocessing import StandardScaler
 from plotly import graph_objects as go
+import plotly.express as px
 from sklearn.metrics import ConfusionMatrixDisplay
 from scipy.optimize import minimize_scalar
 from sklearn.metrics import f1_score
@@ -516,3 +517,51 @@ def find_best_threshold(y_true, y_pred_proba):
     best_threshold = result.x
     best_f1 = -result.fun
     return best_threshold, best_f1  # Return threshold and best F1 score
+
+def plot_pred_proba_distribution(
+    y_true: np.ndarray,
+    pred_proba: np.ndarray,
+    show_plot: bool = True,
+    save_dir_path: Optional[str] = None,
+    class_names: Optional[dict] = None,
+):
+    """
+    Plots the distribution of predicted probabilities with hue on y_true using Plotly.
+
+    Args:
+        y_true (np.ndarray): True class labels (0/1).
+        pred_proba (np.ndarray): Predicted probabilities for class 1.
+        show_plot (bool): Whether to show the plot.
+        save_filepath (Optional[str]): Path to save the figure (HTML).
+        class_names (Optional[dict]): Mapping of class labels to names.
+    """
+    import plotly.graph_objects as go
+
+    df_plot = pd.DataFrame({
+        "y_true": y_true,
+        "pred_proba": pred_proba
+    })
+    if class_names is not None:
+        df_plot["class"] = df_plot["y_true"].map(class_names)
+        hue_col = "class"
+    else:
+        hue_col = "y_true"
+
+    fig = px.histogram(
+        df_plot,
+        x="pred_proba",
+        color=hue_col,
+        nbins=50,
+        barmode="overlay",
+        labels={"pred_proba": "Predicted Probability", "y_true": "True Label"},
+        title="Histogram of Predicted Probabilities by True Labels"
+    )
+    fig.update_layout(template="plotly_white")
+
+    if save_dir_path is not None:
+        filepath = os.path.join(save_dir_path, "pred_proba_distribution.html")
+        os.makedirs(save_dir_path, exist_ok=True)
+        fig.write_html(filepath)
+    if show_plot:
+        fig.show()
+    return fig

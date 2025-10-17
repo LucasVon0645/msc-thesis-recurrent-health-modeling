@@ -16,7 +16,7 @@ from recurrent_health_events_prediction import configs
 from recurrent_health_events_prediction.datasets.HospReadmDataset import (
     HospReadmDataset,
 )
-from recurrent_health_events_prediction.training.utils import find_best_threshold, plot_loss_function_epochs, standard_scale_data
+from recurrent_health_events_prediction.training.utils import find_best_threshold, plot_loss_function_epochs, plot_pred_proba_distribution, standard_scale_data
 from recurrent_health_events_prediction.training.utils import plot_confusion_matrix
 from recurrent_health_events_prediction.training.utils_traditional_classifier import save_test_predictions
 from recurrent_health_events_prediction.utils.general_utils import import_yaml_config, save_yaml_config
@@ -351,7 +351,7 @@ def prepare_train_test_datasets(
     data_directory: str,
     training_data_config: dict,
     model_config: dict,
-    model_config_dir_path: str,
+    save_output_dir_path: str,
     save_scaler_dir_path: str | None = None,
     overwrite_preprocessed: bool = False,
 ) -> tuple:
@@ -377,9 +377,9 @@ def prepare_train_test_datasets(
             save_scaler_dir_path=save_scaler_dir_path,
         )
 
-    pytorch_train_dataset_path = os.path.join(model_config_dir_path, "train_dataset.pt")
-    pytorch_test_dataset_path = os.path.join(model_config_dir_path, "test_dataset.pt")
-    pytorch_last_events_test_dataset_path = os.path.join(model_config_dir_path, "last_events_test_dataset.pt")
+    pytorch_train_dataset_path = os.path.join(save_output_dir_path, "train_dataset.pt")
+    pytorch_test_dataset_path = os.path.join(save_output_dir_path, "test_dataset.pt")
+    pytorch_last_events_test_dataset_path = os.path.join(save_output_dir_path, "last_events_test_dataset.pt")
 
     if (
         os.path.exists(pytorch_train_dataset_path)
@@ -412,13 +412,13 @@ def prepare_train_test_datasets(
         print(f"Test dataset (last events only) size: {len(last_events_test_dataset)}")
 
         # Ensure target directory exists
-        os.makedirs(model_config_dir_path, exist_ok=True)
+        os.makedirs(save_output_dir_path, exist_ok=True)
 
         torch.save(train_dataset, pytorch_train_dataset_path)
         torch.save(test_dataset, pytorch_test_dataset_path)
         torch.save(last_events_test_dataset, pytorch_last_events_test_dataset_path)
 
-        print(f"Saved PyTorch datasets to {model_config_dir_path}")
+        print(f"Saved PyTorch datasets to {save_output_dir_path}")
 
     return train_dataset, test_dataset, last_events_test_dataset, train_df_path, test_df_path
 
@@ -427,6 +427,7 @@ def main(
     model_config_path: str,
     save_scaler_dir_path: str,
     overwrite_preprocessed: bool = False,
+    save_pytorch_datasets_path: Optional[str] = None,
     log_in_neptune: bool = False,
     neptune_tags: Optional[list[str]] = None,
     neptune_run_name: str = "deep_learning_model_run",
@@ -472,12 +473,15 @@ def main(
         neptune_run["train/data_directory"] = data_directory
         neptune_run["tensorboard/run_name"] = tensorboard_run_name
 
+    if save_pytorch_datasets_path is None:
+        save_pytorch_datasets_path = model_config_dir_path
+
     # Prepare datasets (load existing or create + save new)
     train_dataset, test_dataset, last_events_test_dataset, _, _ = prepare_train_test_datasets(
         data_directory=data_directory,
         training_data_config=training_data_config,
         model_config=model_config,
-        model_config_dir_path=model_config_dir_path,
+        save_output_dir_path=save_pytorch_datasets_path,
         save_scaler_dir_path=save_scaler_dir_path,
         overwrite_preprocessed=overwrite_preprocessed,
     )
@@ -523,6 +527,20 @@ def main(
     eval_results_last_events, all_pred_labels, all_pred_probs, all_labels = evaluate(
         last_events_test_dataset, model, batch_size=model_config["batch_size"]
     )
+    
+    class_names=training_data_config.get(
+            "class_names", ["No Readmission", "Readmission"]
+    )
+
+    fig = plot_pred_proba_distribution(
+        all_pred_labels,
+        all_pred_probs,
+        show_plot=False,
+        save_dir_path=log_dir,
+        class_names=class_names
+    )
+    if neptune_run:
+        add_plot_to_neptune_run(neptune_run, "pred_proba_distribution", fig, neptune_path="evaluation/last_events")
 
     print("Evaluation on all test events:", eval_results)
     print("Evaluation on last test events only:", eval_results_last_events)
@@ -552,13 +570,13 @@ def main(
         add_evaluation_results_to_neptune(
             neptune_run,
             eval_results,
-            class_names=training_data_config.get("class_names", ["No Readmission", "Readmission"]),
+            class_names=class_names,
             last_events=False,
         )
         add_evaluation_results_to_neptune(
             neptune_run,
             eval_results_last_events,
-            class_names=training_data_config.get("class_names", ["No Readmission", "Readmission"]),
+            class_names=class_names,
             last_events=True,
         )
         upload_file_to_neptune(
@@ -584,14 +602,18 @@ def main(
 
 if __name__ == "__main__":
     print("Imports complete. Running main...")
-    model_name = "gru_duration_aware"
+    model_name = "gru_duration_aware_min"
+    multiple_hosp_patients = True  # True if patients can have multiple hospital admissions
     save_scaler_dir_path = f"/workspaces/msc-thesis-recurrent-health-modeling/_models/mimic/deep_learning/scalers"
+    if multiple_hosp_patients:
+        save_scaler_dir_path += "/multiple_hosp_patients"
     model_config_path = f"/workspaces/msc-thesis-recurrent-health-modeling/_models/mimic/deep_learning/{model_name}/{model_name}_config.yaml"
-    overwrite_preprocessed = False
+    overwrite_preprocessed = True
 
-    LOG_IN_NEPTUNE = True
+    LOG_IN_NEPTUNE = False  # Set to True to log in Neptune
     neptune_run_name = f"{model_name}_run"
-    neptune_tags = ["deep_learning", "all_patients", "mimic"]
+    # neptune_tags = ["deep_learning", "all_patients", "mimic"]
+    neptune_tags = ["deep_learning", "multiple_hosp_patients", "mimic"]
     
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     tensorboard_run_name = f"{model_name}_{now_str}"  # for TensorBoard logging
@@ -601,10 +623,16 @@ if __name__ == "__main__":
         raise FileNotFoundError(f"Model config path does not exist: {model_config_path}")
     if not os.path.exists(save_scaler_dir_path):
         raise FileNotFoundError(f"Scaler directory path does not exist: {save_scaler_dir_path}")
+    
+    if multiple_hosp_patients:
+        save_pytorch_datasets_path = os.path.dirname(model_config_path) + "/multiple_hosp_patients"
+    else:
+        save_pytorch_datasets_path = None  # Saves in the same dir as model_config_path
 
     main(
         model_config_path=model_config_path,
         save_scaler_dir_path=save_scaler_dir_path,
+        save_pytorch_datasets_path=save_pytorch_datasets_path,
         overwrite_preprocessed=overwrite_preprocessed,
         log_in_neptune=LOG_IN_NEPTUNE,
         neptune_run_name=neptune_run_name,

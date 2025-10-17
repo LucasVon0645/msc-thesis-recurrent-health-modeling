@@ -22,11 +22,9 @@ from lightgbm import LGBMClassifier
 
 from recurrent_health_events_prediction.training.utils import (
     find_best_threshold,
-    plot_confusion_matrix,
     summarize_search_results
 )
 from recurrent_health_events_prediction.utils.neptune_utils import (
-    add_plot_to_neptune_run,
     initialize_neptune_run,
     track_file_in_neptune,
     upload_file_to_neptune,
@@ -55,6 +53,7 @@ def train_test_classifier(
     plot_shap=True,
     random_state=42,
     class_names: Optional[list[str]] = None,
+    show_plots: bool = False,
 ):
     print(f"\nTraining {model_name} with hyperparameter search...")
     
@@ -107,8 +106,7 @@ def train_test_classifier(
     print(f"Accuracy: {accuracy:.4f}")
     print(f"Precision: {precision:.4f}")
     
-    if neptune_run:
-        plot_all_feature_importances(
+    plot_all_feature_importances(
             random_search.best_estimator_,
             X_train,
             y_train,
@@ -117,14 +115,18 @@ def train_test_classifier(
             neptune_path="feat_importances",
             random_state=rand_search_config.get("random_state", 42),
             plot_shap=plot_shap,
+            show_plots=show_plots
         )
-        eval_results = {
-            "roc_auc": roc_auc,
-            "f1_score": f1,
-            "recall": recall,
-            "accuracy": accuracy,
-            "precision": precision,
-        }
+    
+    eval_results = {
+        "roc_auc": roc_auc,
+        "f1_score": f1,
+        "recall": recall,
+        "accuracy": accuracy,
+        "precision": precision,
+    }
+    
+    if neptune_run:
         add_cv_and_evaluation_results_to_neptune(
             neptune_run,
             model_name,
@@ -137,7 +139,7 @@ def train_test_classifier(
         )
 
     print(f"Finished training and evaluation of {model_name}.\n")
-    return y_pred_proba, y_pred
+    return y_pred_proba, y_pred, eval_results, cv_search_results
 
 def train_test_pipeline(
     models_to_train: Optional[list[str]],
@@ -235,7 +237,7 @@ def train_test_pipeline(
         param_distributions["C"] = np.logspace(-4, 4, 100)  # 100 values between 1e-4 and 1e4
         rand_search_config = model_config["logistic_regression"]["rand_search_config"]
 
-        y_pred_proba_logreg, y_pred_logreg = train_test_classifier(
+        y_pred_proba_logreg, y_pred_logreg, _, _ = train_test_classifier(
             logreg_model,
             "Logistic Regression",
             X_train_scaled,
@@ -261,7 +263,7 @@ def train_test_pipeline(
         param_distributions = model_config["random_forest"]["param_distributions"]
         rand_search_config = model_config["random_forest"]["rand_search_config"]
 
-        y_pred_proba_rf, y_pred_rf = train_test_classifier(
+        y_pred_proba_rf, y_pred_rf, _, _ = train_test_classifier(
             rf_model,
             "Random Forest",
             X_train,
@@ -290,7 +292,7 @@ def train_test_pipeline(
         param_distributions = model_config["lgbm"]["param_distributions"]
         rand_search_config = model_config["lgbm"]["rand_search_config"]
 
-        y_pred_proba_lgbm, y_pred_lgbm = train_test_classifier(
+        y_pred_proba_lgbm, y_pred_lgbm, _, _ = train_test_classifier(
             lgbm,
             "LightGBM",
             X_train,
@@ -334,6 +336,7 @@ def main(
     models_to_train: list[str],
     dataset: str,
     model_config_path: Optional[str],
+    output_dir: str,
     log_in_neptune=True,
     neptune_tags=[],
     random_state=42,
@@ -425,16 +428,21 @@ def main(
 
 if __name__ == "__main__":
     dataset = "mimic"  # Change to "mimic" if you want to run on MIMIC dataset or "relapse" for relapse dataset
+    multiple_hosp_patients = True  # True if patients can have multiple hospital admissions
     # Define Neptune tags for logging
     neptune_tags = [
         "baseline",
-        "all_patients",
         dataset,
         "last_events",
         "traditional_classifiers",
     ]
     random_state = 42  # Set random state for reproducibility
     log_in_neptune = True  # Set to True to log the run in Neptune
+
+    if multiple_hosp_patients:
+        neptune_tags.append("multiple_hosp_patients")
+    else:
+        neptune_tags.append("all_patients")
 
     if dataset == "mimic":
         model_config_path = "/workspaces/msc-thesis-recurrent-health-modeling/_models/mimic/classifier_baselines/config.yaml"
@@ -444,6 +452,11 @@ if __name__ == "__main__":
     model_config_exists = check_if_file_exists(model_config_path)
     if not model_config_exists:
         raise FileNotFoundError(f"Model config file not found: {model_config_path}")
+    
+    output_dir = os.path.dirname(model_config_path)
+    if multiple_hosp_patients:
+        output_dir += "/multiple_hosp_patients"
+        os.makedirs(output_dir, exist_ok=True)
 
     models_to_train = [
         "logistic_regression",
@@ -454,6 +467,7 @@ if __name__ == "__main__":
     main(
         dataset=dataset,
         model_config_path=model_config_path,
+        output_dir=output_dir,
         log_in_neptune=log_in_neptune,
         neptune_tags=neptune_tags,
         random_state=random_state,
