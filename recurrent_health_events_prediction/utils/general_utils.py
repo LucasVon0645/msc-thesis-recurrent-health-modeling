@@ -64,3 +64,9 @@ def stringify_dict_values(dictionary: dict, use_parenthesis = True) -> str:
         return '\n'.join(f"{key} ({value})" for key, value in dictionary.items())
     else:
         return '\n'.join(f"{key}: {value}" for key, value in dictionary.items())
+
+def add_suffix_before_ext(path: str, suffix: str) -> str:
+    """e.g., 'train.csv' + '_preprocessed' -> 'train_preprocessed.csv'"""
+    d, base = os.path.dirname(path), os.path.basename(path)
+    stem, ext = os.path.splitext(base)
+    return os.path.join(d, f"{stem}{suffix}{ext}")
