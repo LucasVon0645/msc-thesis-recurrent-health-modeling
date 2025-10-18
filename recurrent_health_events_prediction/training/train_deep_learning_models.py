@@ -6,7 +6,6 @@ from typing import Optional, Tuple
 from datetime import datetime
 import neptune
 
-import pandas as pd
 import numpy as np
 import torch
 import torchmetrics
@@ -16,152 +15,25 @@ from recurrent_health_events_prediction import configs
 from recurrent_health_events_prediction.datasets.HospReadmDataset import (
     HospReadmDataset,
 )
-from recurrent_health_events_prediction.model.utils import plot_auc
-from recurrent_health_events_prediction.training.utils import find_best_threshold, plot_loss_function_epochs, plot_pred_proba_distribution, standard_scale_data
-from recurrent_health_events_prediction.training.utils import plot_confusion_matrix
-from recurrent_health_events_prediction.training.utils_survival import plot_calibration_curve
-from recurrent_health_events_prediction.training.utils_traditional_classifier import save_test_predictions
+from recurrent_health_events_prediction.training.utils import find_best_threshold, plot_loss_function_epochs
+from recurrent_health_events_prediction.training.utils_deep_learning import (
+    add_evaluation_results_to_neptune,
+    build_or_load_datasets,
+    make_tb_writer,
+    plot_evaluation_figures,
+    preprocess_pair,
+)
+from recurrent_health_events_prediction.training.utils_traditional_classifier import (
+    save_test_predictions,
+)
 from recurrent_health_events_prediction.utils.general_utils import import_yaml_config, save_yaml_config
 from recurrent_health_events_prediction.utils.neptune_utils import (
     add_model_config_to_neptune,
-    add_plot_to_neptune_run,
     add_plotly_plots_to_neptune_run,
     initialize_neptune_run,
     upload_file_to_neptune,
     upload_model_to_neptune,
 )
-
-def add_evaluation_results_to_neptune(
-    neptune_run: neptune.Run,
-    eval_results: dict,
-    class_names: Optional[list[str]] = None,
-    last_events: bool = False,
-    
-):
-    neptune_path = "evaluation/last_events" if last_events else "evaluation"
-    for metric_name, metric_value in eval_results.items():
-        if metric_name == "confusion_matrix":
-            fig = plot_confusion_matrix(conf_matrix=metric_value, class_names=class_names)
-            add_plot_to_neptune_run(neptune_run, "confusion_matrix", fig, neptune_path)
-        else:
-            neptune_run[f"{neptune_path}/{metric_name}"] = metric_value
-
-
-def scale_preprocessed_data(
-    data_directory: str, training_data_config: dict, save_scaler_dir_path: str = None
-):
-    """
-    Scale preprocessed data for training and testing.
-
-    Args:
-        data_directory (str): Directory containing the dataset.
-        training_config (dict): Model configuration parameters.
-    Returns:
-        Tuple containing preprocessed training and testing data file paths.
-    """
-    train_file_path = os.path.join(data_directory, "train_events.csv")
-    test_file_path = os.path.join(data_directory, "test_events.csv")
-
-    train_df = pd.read_csv(train_file_path)
-    test_df = pd.read_csv(test_file_path)
-
-    # Preprocess
-    features_to_scale = training_data_config["features_to_scale"]
-
-    train_scaled_df, test_scaled_df = standard_scale_data(
-        train_df, test_df, features_to_scale, save_scaler_dir_path=save_scaler_dir_path
-    )
-
-    train_preprocessed_file_path = os.path.join(
-        data_directory, "train_events_preprocessed.csv"
-    )
-    test_preprocessed_file_path = os.path.join(
-        data_directory, "test_events_preprocessed.csv"
-    )
-
-    train_scaled_df.to_csv(train_preprocessed_file_path, index=False)
-    test_scaled_df.to_csv(test_preprocessed_file_path, index=False)
-
-    return train_preprocessed_file_path, test_preprocessed_file_path
-
-
-def get_train_test_datasets(
-    train_df_path, test_df_path, model_config, training_data_config
-):
-    """
-    Get training and testing datasets.
-    Args:
-        train_df_path (str): Path to the training data CSV file.
-        test_df_path (str): Path to the testing data CSV file.
-        model_config (dict): Model configuration parameters.
-        training_data_config (dict): Training configuration parameters.
-    Returns:
-        Tuple containing training and testing datasets.
-    """
-
-    dataset_config = {
-        "longitudinal_feat_cols": model_config["longitudinal_feat_cols"],
-        "current_feat_cols": model_config["current_feat_cols"],
-        "max_seq_len": model_config.get("max_sequence_length", 5),
-        "no_elective": model_config.get("no_elective", True),
-        "reverse_chronological_order": model_config.get(
-            "reverse_chronological_order", True
-        ),
-        # column names config
-        "subject_id_col": training_data_config.get("patient_id_col", "SUBJECT_ID"),
-        "order_col": training_data_config.get("time_col", "ADMITTIME"),
-        "label_col": training_data_config.get(
-            "binary_event_col", "READMISSION_30_DAYS"
-        ),
-        "next_admt_type_col": training_data_config.get(
-            "next_admt_type_col", "NEXT_ADMISSION_TYPE"
-        ),
-        "hosp_id_col": training_data_config.get("hosp_id_col", "HADM_ID"),
-    }
-
-    # Create datasets
-    train_dataset = HospReadmDataset(csv_path=train_df_path, **dataset_config)
-
-    test_dataset = HospReadmDataset(csv_path=test_df_path, **dataset_config)
-
-    return train_dataset, test_dataset
-
-def get_test_last_events_only_dataset(test_df_path, model_config, training_data_config):
-    """
-    Get testing dataset with only the last event per patient.
-    Args:
-        test_df_path (str): Path to the testing data CSV file.
-        model_config (dict): Model configuration parameters.
-        training_data_config (dict): Training configuration parameters.
-    Returns:
-        Testing dataset with only the last event per patient.
-    """
-
-    dataset_config = {
-        "longitudinal_feat_cols": model_config["longitudinal_feat_cols"],
-        "current_feat_cols": model_config["current_feat_cols"],
-        "max_seq_len": model_config.get("max_sequence_length", 5),
-        "no_elective": model_config.get("no_elective", True),
-        "reverse_chronological_order": model_config.get(
-            "reverse_chronological_order", True
-        ),
-        "last_events_only": True,  # Only keep last event per patient
-        # column names config
-        "subject_id_col": training_data_config.get("patient_id_col", "SUBJECT_ID"),
-        "order_col": training_data_config.get("time_col", "ADMITTIME"),
-        "label_col": training_data_config.get(
-            "binary_event_col", "READMISSION_30_DAYS"
-        ),
-        "next_admt_type_col": training_data_config.get(
-            "next_admt_type_col", "NEXT_ADMISSION_TYPE"
-        ),
-        "hosp_id_col": training_data_config.get("hosp_id_col", "HADM_ID"),
-    }
-
-    # Create dataset
-    test_dataset = HospReadmDataset(csv_path=test_df_path, **dataset_config)
-
-    return test_dataset
 
 
 def train(
@@ -291,13 +163,17 @@ def evaluate(
     test_dataset: HospReadmDataset,
     model: torch.nn.Module,
     batch_size: 64,
-) -> dict:
+) -> Tuple[dict, np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray]]:
     """
     Evaluate the model.
 
     Args:
         test_dataset (HospReadmDataset): The test dataset.
         model (torch.nn.Module): The trained model.
+        batch_size (int): Batch size for evaluation.
+    Returns:
+        A tuple containing evaluation metrics dictionary, predicted labels,
+        predicted probabilities, true labels, and attention scores (if applicable).
     """
 
     print("Starting evaluation...")
@@ -362,166 +238,70 @@ def evaluate(
     }, all_pred_labels, all_pred_probs, all_labels, all_attention_scores
 
 
-def make_tb_writer(log_dir: str | None = None):
-    # e.g., logs go under runs/gru_model_run/<timestamp>
-    from torch.utils.tensorboard import SummaryWriter
-    os.makedirs(log_dir, exist_ok=True)
-    return SummaryWriter(log_dir=log_dir)
-
-
-def prepare_train_test_datasets(
+def prepare_datasets(
+    *,
     data_directory: str,
     training_data_config: dict,
     model_config: dict,
-    save_output_dir_path: str,
-    save_scaler_dir_path: str | None = None,
+    # RAW file names (relative to data_directory) you want to use this time:
+    raw_train_filename: str,
+    raw_eval_filename: str,
+    # Desired .pt filenames (you choose):
+    train_pt_name: str,
+    eval_pt_name: str,
+    cache_pytorch_datasets_path: Optional[str] = None,
+    # Last-events:
+    need_last_events_eval: bool = False,
+    last_events_pt_name: Optional[str] = None,
+    # Options:
+    save_scaler_dir_path: Optional[str] = None,
     overwrite_preprocessed: bool = False,
-) -> tuple[HospReadmDataset, HospReadmDataset, HospReadmDataset, str, str]:
+    overwrite_pt: bool = False,
+) -> Tuple["HospReadmDataset", "HospReadmDataset", Optional["HospReadmDataset"], str, str]:
     """
-    Load or create preprocessed train/test CSVs and corresponding PyTorch datasets.
-
-    Returns:
-        train_dataset, test_dataset, train_df_path, test_df_path
+    Orchestrates preprocessing and dataset caching with fully flexible naming.
+    Returns (train_ds, eval_ds, last_ds_or_None, preproc_train_csv, preproc_eval_csv).
     """
-    print("Preparing train and test datasets...")
-    # Paths to preprocessed CSVs
-    train_df_path = os.path.join(data_directory, "train_events_preprocessed.csv")
-    test_df_path = os.path.join(data_directory, "test_events_preprocessed.csv")
+    raw_train_csv = os.path.join(data_directory, raw_train_filename)
+    raw_eval_csv  = os.path.join(data_directory, raw_eval_filename)
 
-    if (
-        not os.path.exists(train_df_path)
-        or not os.path.exists(test_df_path)
-        or overwrite_preprocessed
-    ):
-        train_df_path, test_df_path = scale_preprocessed_data(
-            data_directory,
-            training_data_config,
-            save_scaler_dir_path=save_scaler_dir_path,
-        )
-
-    pytorch_train_dataset_path = os.path.join(save_output_dir_path, "train_dataset.pt")
-    pytorch_test_dataset_path = os.path.join(save_output_dir_path, "test_dataset.pt")
-    pytorch_last_events_test_dataset_path = os.path.join(save_output_dir_path, "last_events_test_dataset.pt")
-
-    if (
-        os.path.exists(pytorch_train_dataset_path)
-        and os.path.exists(pytorch_test_dataset_path)
-        and os.path.exists(pytorch_last_events_test_dataset_path)
-        and not overwrite_preprocessed
-    ):
-        print("Loading existing PyTorch datasets...")
-        train_dataset = torch.load(pytorch_train_dataset_path, weights_only=False)
-        test_dataset = torch.load(pytorch_test_dataset_path, weights_only=False)
-        last_events_test_dataset = torch.load(pytorch_last_events_test_dataset_path, weights_only=False)
-        print(f"Test dataset (all events) size: {len(test_dataset)}")
-        print(f"Test dataset (last events only) size: {len(last_events_test_dataset)}")
-    else:
-        print("Creating new PyTorch datasets...")
-
-        train_dataset, test_dataset = get_train_test_datasets(
-            train_df_path,
-            test_df_path,
-            model_config,
-            training_data_config=training_data_config,
-        )
-        
-        last_events_test_dataset = get_test_last_events_only_dataset(
-            test_df_path,
-            model_config,
-            training_data_config=training_data_config,
-        )
-        print(f"Test dataset (all events) size: {len(test_dataset)}")
-        print(f"Test dataset (last events only) size: {len(last_events_test_dataset)}")
-
-        # Ensure target directory exists
-        os.makedirs(save_output_dir_path, exist_ok=True)
-
-        torch.save(train_dataset, pytorch_train_dataset_path)
-        torch.save(test_dataset, pytorch_test_dataset_path)
-        torch.save(last_events_test_dataset, pytorch_last_events_test_dataset_path)
-
-        print(f"Saved PyTorch datasets to {save_output_dir_path}")
-
-    return train_dataset, test_dataset, last_events_test_dataset, train_df_path, test_df_path
-
-
-def plot_evaluation_figures(
-    all_labels,
-    all_pred_probs,
-    model_name,
-    log_dir,
-    class_names_dict=None,
-    neptune_run=None,
-):
-    """
-    Generate evaluation plots (predicted probability distribution, ROC, and calibration curve)
-    and optionally log them to Neptune.
-
-    Parameters
-    ----------
-    all_labels : array-like
-        True labels of the dataset.
-    neptune_run=None,
-    """
-    # --- Plot evaluation figures ---
-    fig_hist = plot_pred_proba_distribution(
-        all_labels, all_pred_probs, show_plot=False, class_names=class_names_dict
-    )
-    fig_hist = fig_hist.update_layout(
-        title=f"Predicted Probabilities by True Labels - {model_name}"
-    )
-    fig_hist.write_html(os.path.join(log_dir, "pred_proba_distribution.html"))
-
-    fig_auc = plot_auc(
-        all_pred_probs,
-        all_labels,
-        show_plot=False,
-        title=f"ROC Curve - {model_name}",
-        save_path=os.path.join(log_dir, "roc_curve.html"),
+    # 1) produce '<raw>_preprocessed.csv' for each
+    preproc_train_csv, preproc_eval_csv = preprocess_pair(
+        raw_train_csv=raw_train_csv,
+        raw_eval_csv=raw_eval_csv,
+        training_data_config=training_data_config,
+        save_scaler_dir_path=save_scaler_dir_path,
+        output_dir=data_directory,
+        overwrite=overwrite_preprocessed,
     )
 
-    fig_cal = plot_calibration_curve(
-        all_labels,
-        all_pred_probs,
-        show_plot=False,
-        title=f"Calibration Curve - {model_name}",
-        save_path=os.path.join(log_dir, "calibration_curve.html"),
+    # 2) build/load datasets with the .pt names you want
+    train_ds, eval_ds, last_ds = build_or_load_datasets(
+        preproc_train_csv=preproc_train_csv,
+        preproc_eval_csv=preproc_eval_csv,
+        model_config=model_config,
+        training_data_config=training_data_config,
+        cache_dir=cache_pytorch_datasets_path,
+        train_pt_name=train_pt_name,
+        eval_pt_name=eval_pt_name,
+        compute_last_events_eval=need_last_events_eval,
+        last_events_pt_name=last_events_pt_name,
+        overwrite_pt=overwrite_pt,
     )
+    
+    print("Datasets are ready.")
+    print("Train dataset size:", len(train_ds))
+    print("Eval dataset size:", len(eval_ds))
+    if need_last_events_eval:
+        print("Last-events eval dataset size:", len(last_ds))
 
-    # --- Log to Neptune (if applicable) ---
-    if neptune_run:
-        neptune_path = "evaluation/last_events"
-
-        add_plotly_plots_to_neptune_run(
-            neptune_run,
-            fig_hist,
-            filename="pred_proba_distribution.html",
-            filepath=neptune_path,
-        )
-        add_plotly_plots_to_neptune_run(
-            neptune_run,
-            fig_auc,
-            filename="roc_curve.html",
-            filepath=neptune_path,
-        )
-        add_plotly_plots_to_neptune_run(
-            neptune_run,
-            fig_cal,
-            filename="calibration_curve.html",
-            filepath=neptune_path,
-        )
-
-    return {
-        "hist": fig_hist,
-        "roc": fig_auc,
-        "calibration": fig_cal,
-    }
+    return train_ds, eval_ds, last_ds, preproc_train_csv, preproc_eval_csv
 
 
 def main(
     model_config_path: str,
     save_scaler_dir_path: str,
-    overwrite_preprocessed: bool = False,
+    overwrite_data_files: bool = False,
     save_pytorch_datasets_path: Optional[str] = None,
     log_in_neptune: bool = False,
     neptune_tags: Optional[list[str]] = None,
@@ -573,13 +353,24 @@ def main(
         save_pytorch_datasets_path = model_config_dir_path
 
     # Prepare datasets (load existing or create + save new)
-    train_dataset, test_dataset, last_events_test_dataset, _, _ = prepare_train_test_datasets(
+    train_dataset, test_dataset, last_events_test_dataset, _, _ = prepare_datasets(
         data_directory=data_directory,
         training_data_config=training_data_config,
         model_config=model_config,
-        save_output_dir_path=save_pytorch_datasets_path,
+        # Raw filenames:
+        raw_train_filename="train_full_events.csv",
+        raw_eval_filename="test_events.csv",
+        # Desired .pt filenames:
+        train_pt_name="train_full_dataset.pt",
+        eval_pt_name="test_dataset.pt",
+        cache_pytorch_datasets_path=save_pytorch_datasets_path,
+        # Last-events:
+        need_last_events_eval=True,
+        last_events_pt_name="last_events_dataset.pt",
+        # Options:
         save_scaler_dir_path=save_scaler_dir_path,
-        overwrite_preprocessed=overwrite_preprocessed,
+        overwrite_preprocessed=overwrite_data_files,
+        overwrite_pt=overwrite_data_files
     )
 
     print("Initializing TensorBoard writer...")
@@ -709,7 +500,7 @@ def main(
 
 if __name__ == "__main__":
     print("Imports complete. Running main...")
-    model_dir_name = "gru_duration_aware_min"
+    model_dir_name = "gru"
     multiple_hosp_patients = True  # True if patients can have multiple hospital admissions
     save_scaler_dir_path = f"/workspaces/msc-thesis-recurrent-health-modeling/_models/mimic/deep_learning/scalers"
     if multiple_hosp_patients:
@@ -717,7 +508,7 @@ if __name__ == "__main__":
     model_config_path = f"/workspaces/msc-thesis-recurrent-health-modeling/_models/mimic/deep_learning/{model_dir_name}/{model_dir_name}_config.yaml"
     overwrite_preprocessed = False
 
-    LOG_IN_NEPTUNE = True  # Set to True to log in Neptune
+    LOG_IN_NEPTUNE = False  # Set to True to log in Neptune
     neptune_run_name = f"{model_dir_name}_run"
     # neptune_tags = ["deep_learning", "all_patients", "mimic"]
     neptune_tags = ["deep_learning", "multiple_hosp_patients", "mimic"]
@@ -740,7 +531,7 @@ if __name__ == "__main__":
         model_config_path=model_config_path,
         save_scaler_dir_path=save_scaler_dir_path,
         save_pytorch_datasets_path=save_pytorch_datasets_path,
-        overwrite_preprocessed=overwrite_preprocessed,
+        overwrite_data_files=overwrite_preprocessed,
         log_in_neptune=LOG_IN_NEPTUNE,
         neptune_run_name=neptune_run_name,
         neptune_tags=neptune_tags,
