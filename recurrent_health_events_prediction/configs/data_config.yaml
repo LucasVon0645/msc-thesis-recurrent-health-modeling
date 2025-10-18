@@ -72,6 +72,7 @@ training_data:
     preprocessed_output_path_1st_round: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes"
     data_directory: "/workspaces/msc-thesis-recurrent-health-modeling/data/mimic-iii-preprocessed/copd_hf_renal_diabetes/multiple_hosp_patients/train_test"
     tensorboard_log_dir: "/workspaces/msc-thesis-recurrent-health-modeling/_runs"
+    optuna_log_dir: "/workspaces/msc-thesis-recurrent-health-modeling/_runs_optuna"
     features_to_scale:
       - "AGE"
       - "LOG_HOSPITALIZATION_DAYS"

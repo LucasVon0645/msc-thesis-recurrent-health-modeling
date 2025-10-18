@@ -5,6 +5,7 @@ data
 .DS_Store
 .neptune
 _runs
+_runs_optuna
 __pycache__
 _models
 *.pyc
