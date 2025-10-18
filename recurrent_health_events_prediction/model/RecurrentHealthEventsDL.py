@@ -47,6 +47,9 @@ class GRUNet(nn.Module):
             ("fc2", nn.Linear(hidden_size_head, 1)),
         ]))
 
+    def has_attention(self) -> bool:
+        return False
+    
     def forward(self,
                 x_current: torch.Tensor,
                 x_past: torch.Tensor,
@@ -141,6 +144,9 @@ class AttentionPoolingNet(nn.Module):
             ("fc2", nn.Linear(hidden_size_head, 1)),
         ]))
 
+    def has_attention(self) -> bool:
+        return True
+
     def _attend(self, H: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         """
         Compute masked attention weights over time steps.
@@ -150,7 +156,7 @@ class AttentionPoolingNet(nn.Module):
         returns alpha: [B_sel, T]
         """
         # scores s_k = a^T h_k + b
-        s = torch.einsum("btm,m->bt", H, self.attn_vec) + self.attn_bias
+        s = H.matmul(self.attn_vec) + self.attn_bias
         s = s.masked_fill(~mask, float("-inf"))
         alpha = F.softmax(s, dim=1)
         # corner case: sample with no valid steps -> all -inf -> NaNs after softmax
@@ -189,15 +195,18 @@ class AttentionPoolingNet(nn.Module):
             m_sel = mask_past[has_past]          # [B_sel, T]
 
             # project: H = W x
+            # proj() applies linear layer to last dim
             H = self.proj(x_sel)                 # [B_sel, T, m]
 
             # attention weights (masked)
             alpha = self._attend(H, m_sel)       # [B_sel, T]
 
             # pooled: z = sum_t alpha_t * h_t
+            # alpha.unsqueeze(1): [B_sel, 1, T]
+            # bmm -> multiplies each matrix alpha [1, T] in the batch by H [T, m]
             z_sel = torch.bmm(alpha.unsqueeze(1), H).squeeze(1)  # [B_sel, m]
             z[has_past] = z_sel
 
         feats = torch.cat([z, x_current], dim=1)        # [B, m + D_curr]
         logits = self.classifier_head(feats).squeeze(-1)  # [B]
-        return logits
+        return logits, alpha

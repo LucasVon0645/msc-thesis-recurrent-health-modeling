@@ -224,6 +224,8 @@ def train(
     print("Model parameters:")
     for key, value in model_config["model_params"].items():
         print(f"  {key}: {value}")
+    
+    has_attention: bool = model.has_attention()
 
     # Set up loss function
     criterion = torch.nn.BCEWithLogitsLoss()
@@ -247,7 +249,12 @@ def train(
         for batch in train_loader:
             x_current, x_past, mask_past, labels = batch
             optimizer.zero_grad()
-            outputs_logits = model(x_current, x_past, mask_past).squeeze(-1)
+            if has_attention:
+                outputs_logits, _ = model(x_current, x_past, mask_past)
+                outputs_logits = outputs_logits.squeeze(-1)
+            else:
+                outputs_logits = model(x_current, x_past, mask_past).squeeze(-1)
+            
             loss = criterion(outputs_logits, labels)
             loss.backward()
             optimizer.step()
@@ -305,20 +312,35 @@ def evaluate(
     # Evaluation metrics
     auroc_metric = torchmetrics.AUROC(task="binary", num_classes=2)
 
-    all_pred_probs = np.array([])
-    all_labels = np.array([])
+    all_pred_probs = []
+    all_labels = []
+    all_attention_scores = []  # For attention models
 
     with torch.no_grad():
         for batch in test_dataloader:
             x_current, x_past, mask_past, labels = batch
-            outputs_logits = model(x_current, x_past, mask_past)
-            probs = torch.sigmoid(outputs_logits)
-            all_pred_probs = np.concatenate((all_pred_probs, probs.cpu().numpy()))
-            all_labels = np.concatenate((all_labels, labels.cpu().numpy()))
+            if model.has_attention():
+                outputs_logits, attention_scores = model(x_current, x_past, mask_past)
+                outputs_logits = outputs_logits.squeeze(-1)
+                attention_scores = attention_scores.squeeze(-1)  # shape (B, T)
+                all_attention_scores.append(attention_scores.cpu().numpy())
+            else:
+                outputs_logits = model(x_current, x_past, mask_past).squeeze(-1)
+
+            probs = torch.sigmoid(outputs_logits).reshape(-1)
+            all_pred_probs.append(probs.cpu().numpy())
+            all_labels.append(labels.cpu().numpy())
 
             auroc_metric.update(probs, labels)
 
     auroc = auroc_metric.compute().item()
+    
+    # concatenate all batches into one big array (dataset_size, T)
+    all_attention_scores = (
+        np.concatenate(all_attention_scores, axis=0) if all_attention_scores else None
+    )
+    all_pred_probs = np.concatenate(all_pred_probs, axis=0)
+    all_labels = np.concatenate(all_labels, axis=0)
 
     best_threshold, best_f1 = find_best_threshold(all_labels, all_pred_probs)
 
@@ -328,7 +350,7 @@ def evaluate(
     recall = recall_score(all_labels, all_pred_labels)
     accuracy = accuracy_score(all_labels, all_pred_labels)
     precision = precision_score(all_labels, all_pred_labels)
-    
+
     return {
         "f1_score": best_f1,
         "auroc": auroc,
@@ -337,7 +359,7 @@ def evaluate(
         "recall": recall,
         "accuracy": accuracy,
         "precision": precision,
-    }, all_pred_labels, all_pred_probs, all_labels
+    }, all_pred_labels, all_pred_probs, all_labels, all_attention_scores
 
 
 def make_tb_writer(log_dir: str | None = None):
@@ -496,7 +518,6 @@ def plot_evaluation_figures(
     }
 
 
-
 def main(
     model_config_path: str,
     save_scaler_dir_path: str,
@@ -595,7 +616,7 @@ def main(
     print(f"Trained model saved to {model_save_path}")
     
     # Model train metrics
-    train_metrics, _, _, _ = evaluate(
+    train_metrics, _, _, _, _ = evaluate(
         train_dataset, model, batch_size=model_config["batch_size"]
     )
     print("Training metrics: ", train_metrics)
@@ -608,8 +629,8 @@ def main(
                 neptune_run[f"train/{metric_name}"] = metric_value
     
     # Evaluate model
-    eval_results, _, _, _ = evaluate(test_dataset, model, batch_size=model_config["batch_size"])
-    eval_results_last_events, all_pred_labels, all_pred_probs, all_labels = evaluate(
+    eval_results, _, _, _, _ = evaluate(test_dataset, model, batch_size=model_config["batch_size"])
+    eval_results_last_events, all_pred_labels, all_pred_probs, all_labels, all_attention_scores = evaluate(
         last_events_test_dataset, model, batch_size=model_config["batch_size"]
     )
 

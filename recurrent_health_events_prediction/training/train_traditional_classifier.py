@@ -81,29 +81,35 @@ def train_test_classifier(
                 f"X_train contains NaN values. Please check your data preprocessing."
             )
     
+    # Evaluate on training set
+    y_train_pred_proba = random_search.predict_proba(X_train)[:, 1]
+    auc_train = roc_auc_score(y_train, y_train_pred_proba)
+    print(f"Train AUC for best {model_name}: ", auc_train)
+    
+    best_threshold, best_f1 = find_best_threshold(y_train, y_train_pred_proba)
+    print(f"Best threshold for F1 score in train set: {best_threshold:.4f} with F1: {best_f1:.4f}")
+    
     cv_search_results = summarize_search_results(
         random_search, print_results=verbose, model_name=model_name
     )
     
     # Inference and evaluation
-    y_pred_proba = random_search.predict_proba(X_test)
-    if y_pred_proba.ndim != 1:
-        y_pred_proba = y_pred_proba[:, 1]  # Get probabilities for the positive class
-    roc_auc = roc_auc_score(y_test, y_pred_proba)
+    y_test_pred_proba = random_search.predict_proba(X_test)
+    if y_test_pred_proba.ndim != 1:
+        y_test_pred_proba = y_test_pred_proba[:, 1]  # Get probabilities for the positive class
+    roc_auc = roc_auc_score(y_test, y_test_pred_proba)
     print(f"{model_name} model evaluation:")
     print("AUC: ", roc_auc)
     
     # Find best threshold based on F1 score
-    best_threshold, best_f1 = find_best_threshold(y_test, y_pred_proba)
-    print(f"Best threshold for F1 score: {best_threshold:.4f} with F1: {best_f1:.4f}")
-    y_pred = (y_pred_proba >= best_threshold).astype(int)
+    y_test_pred = (y_test_pred_proba >= best_threshold).astype(int)
     
     # Compute metrics
-    conf_matrix = confusion_matrix(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred)
-    recall = recall_score(y_test, y_pred)
-    accuracy = accuracy_score(y_test, y_pred)
-    precision = precision_score(y_test, y_pred)
+    conf_matrix = confusion_matrix(y_test, y_test_pred)
+    f1 = f1_score(y_test, y_test_pred)
+    recall = recall_score(y_test, y_test_pred)
+    accuracy = accuracy_score(y_test, y_test_pred)
+    precision = precision_score(y_test, y_test_pred)
 
     print(f"F1 Score: {f1:.4f}")
     print(f"Recall: {recall:.4f}")
@@ -122,12 +128,14 @@ def train_test_classifier(
             show_plots=show_plots
         )
     class_names_dict = {i: class_names[i] for i in range(len(class_names))} if class_names else None
-    fig_hist = plot_pred_proba_distribution(y_test, y_pred_proba, show_plot=False, class_names=class_names_dict)
+    fig_hist = plot_pred_proba_distribution(y_test, y_test_pred_proba, show_plot=False, class_names=class_names_dict)
     fig_hist = fig_hist.update_layout(title=f"Predicted Probabilities by True Labels - {model_name}")
-    fig_auc = plot_auc(y_pred_proba, y_test, show_plot=False, title=f"ROC Curve - {model_name}")
-    fig_cal = plot_calibration_curve(y_test, y_pred_proba, show_plot=False, title=f"Calibration Curve - {model_name}")
+    fig_auc = plot_auc(y_test_pred_proba, y_test, show_plot=False, title=f"ROC Curve - {model_name}")
+    fig_cal = plot_calibration_curve(y_test, y_test_pred_proba, show_plot=False, title=f"Calibration Curve - {model_name}")
 
     if neptune_run:
+        neptune_run[f"results/{model_name.lower().replace(' ', '_')}/train/auc"] = auc_train
+        
         # Upload plots to Neptune
         neptune_path = f"results/{model_name.lower().replace(' ', '_')}/evaluation"
         add_plotly_plots_to_neptune_run(
@@ -170,7 +178,7 @@ def train_test_classifier(
         )
 
     print(f"Finished training and evaluation of {model_name}.\n")
-    return y_pred_proba, y_pred, eval_results, cv_search_results
+    return y_test_pred_proba, y_test_pred, eval_results, cv_search_results
 
 def train_test_pipeline(
     models_to_train: Optional[list[str]],
